@@ -12,9 +12,30 @@ Use Algorithm::Time::ToNumber->suricata_to_circle_both for converting the desire
 
 Algorithm::EventsPerSecond is used for tracking events per second for stuff.
 
+Sets are added under the slug of suricata.
+
+### flow
+
+one set ...
+
+set flow
+
+| column | description
+|-|-|
+| flow.pkts_toserver | raw flow.pkts_toserver |
+| flow.pkts_toserver | raw flow.pkts_toserver |
+| flow.bytes_toserver | raw flow.bytes_toserver |
+| flow.bytes_toserver | raw flow.bytes_toserver |
+| duration | derived from flow.end - flow.start |
+| proto | encoded proto|
+| proto | encoded proto |
+| dest_port | encoded based on if it is well known or not |
+| bytes_to_packets | bytes to packet ratio |
+| up_to_down | upload to download ration |
+
 ### dns
 
-Twho sets... the with time includes
+Two sets... the with time includes
 
 set dns_with_time
 
