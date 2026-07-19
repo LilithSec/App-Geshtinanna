@@ -13,6 +13,8 @@ use Algorithm::Classifier::IsolationForest::Zorita ();
 use Algorithm::Classifier::IsolationForest::Zorita::Writer ();
 use Algorithm::Classifier::IsolationForest::Zorita::Online::Client ();
 
+=encoding UTF-8
+
 =head1 NAME
 
 App::Geshtinanna::Suricata - Tail Suricata EVE flow logs into Zorita Isolation Forest sets.
@@ -62,29 +64,58 @@ C<zorita streamd> daemon.
 =back
 
 The extractors here mirror the feature tables in the top-level F<README.md> and
-the writer input contract in F<share/set_info_jsons/online/README.md>. Only a
-representative handful (C<flow>, C<http>, C<dns>, C<tls>, C<smtp>) are
-implemented so far; any other configured flow logs a one-time warning and is
-skipped. New
-flows are added by writing one C<_extract_$flow> method and registering it in
-L</%EXTRACTORS>.
+the writer input contract in F<share/set_info_jsons/online/README.md>. Every
+shipped set has an extractor; any flow without one logs a one-time warning and
+is skipped. New flows are added by writing one C<_extract_$flow> method and
+registering it in L</%EXTRACTORS>.
+
+Extractors for the many L2-L7 protocols are necessarily best-effort against
+Suricata's per-protocol EVE shape: fields are read defensively (a missing field
+degrades to a neutral default rather than dying), and a few features that need
+data Suricata does not carry in the event (e.g. a paired flow's byte totals) use
+documented placeholders. Field names track current Suricata EVE output.
 
 =cut
 
 # set name -> extractor method name. Adding a flow = add a _extract_$flow
 # method and an entry here.
 my %EXTRACTORS = (
-    flow => '_extract_flow',
-    http => '_extract_http',
-    dns  => '_extract_dns',
-    tls  => '_extract_tls',
-    smtp => '_extract_smtp',
+    flow           => '_extract_flow',
+    http           => '_extract_http',
+    dns            => '_extract_dns',
+    dns_with_time  => '_extract_dns_with_time',
+    tls            => '_extract_tls',
+    smtp           => '_extract_smtp',
+    ssh            => '_extract_ssh',
+    ftp            => '_extract_ftp',
+    ftp_data       => '_extract_ftp_data',
+    files          => '_extract_files',
+    dhcp           => '_extract_dhcp',
+    arp            => '_extract_arp',
+    krb5           => '_extract_krb5',
+    smb            => '_extract_smb',
+    nfs            => '_extract_nfs',
+    dcerpc         => '_extract_dcerpc',
+    snmp           => '_extract_snmp',
+    sip            => '_extract_sip',
+    rdp            => '_extract_rdp',
+    rfb            => '_extract_rfb',
+    mqtt           => '_extract_mqtt',
+    quic           => '_extract_quic',
+    ike            => '_extract_ike',
+    pgsql          => '_extract_pgsql',
+    tftp           => '_extract_tftp',
+    modbus         => '_extract_modbus',
+    dnp3           => '_extract_dnp3',
+    enip           => '_extract_enip',
+    'bittorrent-dht' => '_extract_bittorrent_dht',
 );
 
 # set name -> EVE event_type, when they differ from the set name. Used only as
-# a sanity filter against a mislabelled line.
+# a sanity filter against a mislabelled line (hyphen/underscore differences are
+# normalized away in _poe_flow_line, so only genuine remappings belong here).
 my %EVENT_TYPE = (
-    # dns_with_time => 'dns', ...
+    dns_with_time => 'dns',   # a second, time-aware view of the dns EVE log
 );
 
 =head1 METHODS
@@ -234,7 +265,14 @@ sub _poe_flow_line {
     }
 
     my $want = $EVENT_TYPE{$set} // $set;
-    return if defined $rec->{event_type} && $rec->{event_type} ne $want;
+    if ( defined $rec->{event_type} ) {
+        # Suricata is inconsistent about hyphen vs. underscore between the
+        # app-layer name and the EVE event_type (e.g. bittorrent-dht); compare
+        # with both normalized so a naming quirk does not drop every line.
+        ( my $got = $rec->{event_type} ) =~ tr/-/_/;
+        ( my $exp = $want )              =~ tr/-/_/;
+        return if $got ne $exp;
+    }
 
     my $method = $EXTRACTORS{$set};
     if ( !$method ) {
@@ -489,6 +527,556 @@ sub _extract_smtp {
     };
 }
 
+sub _extract_dns_with_time {
+    my ( $self, $rec ) = @_;
+    my $row = $self->_extract_dns($rec) or return;
+    my ( $sin, $cos ) = _time_circle( $rec->{timestamp} );
+    $row->{time_sin} = $sin;
+    $row->{time_cos} = $cos;
+    return $row;
+}
+
+sub _extract_ssh {
+    my ( $self, $rec ) = @_;
+    my $s = $rec->{ssh} or return;
+    my $c = ref $s->{client} eq 'HASH' ? $s->{client} : {};
+    my $v = ref $s->{server} eq 'HASH' ? $s->{server} : {};
+    my $src = $rec->{src_ip} // '?';
+
+    return {
+        hassh           => ref $c->{hassh} eq 'HASH' ? ( $c->{hassh}{hash} // '' ) : ( $c->{hassh} // '' ),
+        hassh_server    => ref $v->{hassh} eq 'HASH' ? ( $v->{hassh}{hash} // '' ) : ( $v->{hassh} // '' ),
+        client_software => $c->{software_version} // '',
+        server_software => $v->{software_version} // '',
+        proto_version   => $c->{proto_version} // '',
+        conn_rate       => $self->_rate( "ssh:conn:$src", 1 ),
+    };
+}
+
+sub _extract_ftp {
+    my ( $self, $rec ) = @_;
+    my $f = $rec->{ftp} or return;
+    my $src = $rec->{src_ip} // '?';
+
+    my $command = uc( $f->{command} // '' );
+    my $code = ref $f->{completion_code} eq 'ARRAY'
+        ? ( $f->{completion_code}[0] // '' )
+        : ( $f->{completion_code} // '' );
+
+    # USER <name> carries the login; keep it for the username_entropy munger.
+    my $username = ( $command eq 'USER' ) ? ( $f->{command_data} // '' ) : '';
+
+    return {
+        ftp_command       => $command,
+        reply_code        => _num($code) // -1,        # -> ftp_enum (numeric status)
+        username          => $username,          # -> username_entropy
+        login_fail_rate   => $self->_rate( "ftp:fail:$src", $code eq '530' ),
+        command_rate      => $self->_rate( "ftp:cmd:$src", 1 ),
+        distinct_commands => $self->_distinct_count( "ftp:dc:$src", $command ),
+        passive_mode      => ( $command eq 'PASV' || $command eq 'EPSV' || $f->{dynamic_port} ) ? 1 : 0,
+    };
+}
+
+sub _extract_ftp_data {
+    my ( $self, $rec ) = @_;
+    my $d = $rec->{ftp_data} or return;
+    my $src = $rec->{src_ip} // '?';
+
+    my $command  = uc( $d->{command} // '' );
+    my $filename = $d->{filename} // '';
+
+    return {
+        transfer_command       => $command,
+        transfer_bytes         => 0,   # paired-flow byte total is not in this event
+        direction              => ( $command eq 'STOR' ) ? 1 : 0,
+        filename               => $filename,   # -> filename_length + filename_entropy
+        files_per_session_rate => $self->_rate( "ftpd:files:$src", 1 ),
+    };
+}
+
+sub _extract_files {
+    my ( $self, $rec ) = @_;
+    my $fi = $rec->{fileinfo} or return;
+    my $src = $rec->{src_ip} // '?';
+
+    my $filename = $fi->{filename} // '';
+    my $ext      = _ext($filename);
+    my $magic    = $fi->{magic} // '';
+    my $hash     = $fi->{sha256} // $fi->{md5} // $filename;
+
+    return {
+        file_size         => $fi->{size} // 0,
+        filename          => $filename,     # -> length + entropy + non_ascii
+        extension         => $ext,          # -> hash-encoded
+        double_extension  => ( $filename =~ /\.[A-Za-z0-9]{1,6}\.[A-Za-z0-9]{1,6}$/ ) ? 1 : 0,
+        magic_ext_mismatch => _magic_mismatch( $magic, $ext ),
+        truncated         => ( ( $fi->{state} // '' ) ne 'CLOSED' || $fi->{gaps} ) ? 1 : 0,
+        direction         => ( ( $fi->{direction} // '' ) =~ /to_?client|inbound/i ) ? 1 : 0,
+        hash_first_seen   => $self->_first_seen("files:hash:$hash"),
+        hash_prevalence   => $self->_freq( 'files:hash', $hash ),
+    };
+}
+
+sub _extract_dhcp {
+    my ( $self, $rec ) = @_;
+    my $d = $rec->{dhcp} or return;
+
+    my $mac    = $d->{client_mac} // '?';
+    my $req_ip = $d->{requested_ip} // '';
+    my $asn_ip = $d->{assigned_ip} // '';
+    my $subnet = _subnet( length $asn_ip ? $asn_ip : ( $d->{client_ip} // '' ) );
+    my $is_reply = ( $d->{type} // '' ) eq 'reply';
+
+    return {
+        dhcp_type                   => $d->{dhcp_type} // '',
+        hostname                    => $d->{hostname} // '',   # -> length + entropy
+        vendor_class                => $d->{vendor_class} // $d->{vendor_class_identifier} // '',
+        mac_request_rate            => $self->_rate( "dhcp:mac:$mac", 1 ),
+        new_mac                     => $self->_first_seen("dhcp:newmac:$mac"),
+        requested_assigned_mismatch => ( length $req_ip && length $asn_ip && $req_ip ne $asn_ip ) ? 1 : 0,
+        # a lease-time mismatch needs offer<->request correlation across two
+        # messages, which we do not track; left neutral.
+        lease_mismatch    => 0,
+        subnet_server_count => $self->_distinct_count( "dhcp:srv:$subnet", $is_reply ? ( $rec->{src_ip} // '?' ) : () ),
+        subnet_mac_count    => $self->_distinct_count( "dhcp:macs:$subnet", $mac ),
+    };
+}
+
+sub _extract_arp {
+    my ( $self, $rec ) = @_;
+    my $a = $rec->{arp} or return;
+
+    my $opcode = $a->{opcode} // '';
+    my $mac    = $a->{src_mac} // '?';
+    my $ip     = $a->{src_ip}  // '?';
+    my $is_reply = ( $opcode =~ /reply/i ) ? 1 : 0;
+
+    return {
+        arp_opcode       => $opcode,
+        reply_rate       => $self->_rate( "arp:reply:$mac", $is_reply ),
+        request_rate     => $self->_rate( "arp:req:$mac", !$is_reply ),
+        macs_per_ip      => $self->_distinct_count( "arp:mip:$ip",  $mac ),
+        ips_per_mac      => $self->_distinct_count( "arp:ipm:$mac", $ip ),
+        new_mac_ip       => $self->_first_seen("arp:pair:$mac|$ip"),
+        # gratuitous / unsolicited: a reply announcing its own binding
+        # (sender IP == target IP) rather than answering a request.
+        unsolicited_flag => ( $is_reply && ( $a->{src_ip} // '' ) eq ( $a->{dest_ip} // '' ) ) ? 1 : 0,
+    };
+}
+
+sub _extract_krb5 {
+    my ( $self, $rec ) = @_;
+    my $k = $rec->{krb5} or return;
+    my $src = $rec->{src_ip} // '?';
+
+    my $msg   = $k->{msg_type} // '';
+    my $cname = $k->{cname} // '';
+    my $sname = $k->{sname} // '';
+
+    return {
+        msg_type            => $msg,
+        enc_type            => $k->{encryption} // $k->{ticket_encryption} // '',
+        error_code          => $k->{error_code} // '',
+        cname               => $cname,   # -> cname_entropy
+        sname               => $sname,   # -> sname_entropy
+        weak_encryption     => $k->{weak_encryption} ? 1 : 0,
+        ticket_request_rate => $self->_rate( "krb5:tgs:$cname", $msg =~ /TGS_REQ/i ),
+        fail_rate           => $self->_rate( "krb5:fail:$src", $msg =~ /ERROR/i || defined $k->{error_code} ),
+        distinct_snames     => $self->_distinct_count( "krb5:sname:$cname", length $sname ? $sname : () ),
+    };
+}
+
+sub _extract_smb {
+    my ( $self, $rec ) = @_;
+    my $s = $rec->{smb} or return;
+    my $src = $rec->{src_ip} // '?';
+
+    my $command  = $s->{command} // '';
+    my $status   = $s->{status} // '';
+    my $share    = $s->{share} // '';
+    my $filename = $s->{filename} // '';
+    my $ntlm     = ref $s->{ntlmssp} eq 'HASH' ? $s->{ntlmssp} : {};
+
+    return {
+        smb_command      => $command,
+        dialect          => $s->{dialect} // '',
+        named_pipe       => $s->{named_pipe} // '',
+        filename         => $filename,               # -> filename_entropy
+        ntlm_host        => $ntlm->{host} // '',      # -> ntlm_host_entropy
+        status_fail      => ( length $status && $status !~ /SUCCESS/i ) ? 1 : 0,
+        admin_share      => ( $share =~ /\$$/ ) ? 1 : 0,
+        distinct_shares  => $self->_distinct_count( "smb:share:$src", length $share ? $share : () ),
+        distinct_files   => $self->_distinct_count( "smb:file:$src", length $filename ? $filename : () ),
+        write_delete_rate => $self->_rate( "smb:wd:$src", $command =~ /WRITE|RENAME|DELETE|SET_INFO/i ),
+    };
+}
+
+sub _extract_nfs {
+    my ( $self, $rec ) = @_;
+    my $n = $rec->{nfs} or return;
+    my $src = $rec->{src_ip} // '?';
+
+    my $proc     = $n->{procedure} // '';
+    my $status   = $n->{status} // '';
+    my $filename = $n->{filename} // '';
+
+    return {
+        nfs_procedure     => $proc,
+        nfs_version       => $n->{version} // 0,
+        filename          => $filename,     # -> filename_entropy
+        auth_uid          => defined $n->{uid} ? $n->{uid} : ( ref $n->{rpc} eq 'HASH' ? ( $n->{rpc}{creds}{uid} // '' ) : '' ),
+        status_fail       => ( length $status && $status ne 'OK' ) ? 1 : 0,
+        distinct_files    => $self->_distinct_count( "nfs:file:$src", length $filename ? $filename : () ),
+        write_delete_rate => $self->_rate( "nfs:wd:$src", $proc =~ /WRITE|REMOVE|RENAME/i ),
+        readdir_rate      => $self->_rate( "nfs:rd:$src", $proc =~ /READDIR/i ),
+    };
+}
+
+sub _extract_dcerpc {
+    my ( $self, $rec ) = @_;
+    my $d = $rec->{dcerpc} or return;
+    my $src = $rec->{src_ip} // '?';
+
+    my $ifaces = $d->{interfaces};
+    my $uuid   = ref $ifaces eq 'ARRAY' && ref $ifaces->[0] eq 'HASH'
+        ? ( $ifaces->[0]{uuid} // '' )
+        : ( $d->{interface_uuid} // '' );
+    my $opnum   = $d->{opnum};
+    my $request = $d->{request} // '';
+    my $is_bind  = ( $request =~ /BIND/i ) ? 1 : 0;
+    my $is_fault = ( ( $d->{response} // '' ) =~ /FAULT/i ) ? 1 : 0;
+
+    return {
+        interface_uuid      => $uuid,
+        opnum               => defined $opnum ? $opnum : -1,
+        request_rate        => $self->_rate( "dcerpc:req:$src", $request =~ /REQUEST/i || defined $opnum ),
+        bind_rate           => $self->_rate( "dcerpc:bind:$src", $is_bind ),
+        fault_rate          => $self->_rate( "dcerpc:fault:$src", $is_fault ),
+        distinct_opnums     => $self->_distinct_count( "dcerpc:op:$src", defined $opnum ? $opnum : () ),
+        distinct_interfaces => $self->_distinct_count( "dcerpc:if:$src", length $uuid ? $uuid : () ),
+    };
+}
+
+sub _extract_snmp {
+    my ( $self, $rec ) = @_;
+    my $s = $rec->{snmp} or return;
+    my $src = $rec->{src_ip} // '?';
+
+    my $pdu  = $s->{pdu_type} // '';
+    my @oids = ref $s->{vars} eq 'ARRAY' ? @{ $s->{vars} } : ();
+
+    return {
+        snmp_version   => $s->{version} // 0,
+        pdu_type       => $pdu,
+        community      => $s->{community} // '',   # -> present + entropy
+        request_rate   => $self->_rate( "snmp:req:$src", 1 ),
+        set_rate       => $self->_rate( "snmp:set:$src", $pdu =~ /set/i ),
+        error_rate     => $self->_rate( "snmp:err:$src", $s->{error} ? 1 : 0 ),
+        distinct_oids  => $self->_distinct_count( "snmp:oid:$src", @oids ),
+    };
+}
+
+sub _extract_sip {
+    my ( $self, $rec ) = @_;
+    my $s = $rec->{sip} or return;
+    my $src = $rec->{src_ip} // '?';
+
+    my $method = uc( $s->{method} // '' );
+    my $code   = $s->{code} // '';
+    my $uri    = $s->{uri} // '';
+    my ($uri_user) = $uri =~ m{^sips?:([^@;]+)@};
+    $uri_user //= '';
+
+    return {
+        sip_method     => $method,
+        response_code  => _num($code) // -1,   # -> sip_enum (numeric status)
+        uri_user       => $uri_user,   # -> uri_user_length + uri_user_entropy
+        user_agent     => $s->{user_agent} // '',
+        request_rate   => $self->_rate( "sip:req:$src", length $method ? 1 : 0 ),
+        auth_fail_rate => $self->_rate( "sip:authf:$src", $code =~ /^(?:401|403|407)$/ ),
+        distinct_uris  => $self->_distinct_count( "sip:uri:$src", length $uri ? $uri : () ),
+    };
+}
+
+sub _extract_rdp {
+    my ( $self, $rec ) = @_;
+    my $r = $rec->{rdp} or return;
+    my $src = $rec->{src_ip} // '?';
+    my $c = ref $r->{client} eq 'HASH' ? $r->{client} : {};
+
+    my $event = $r->{event_type} // '';
+
+    return {
+        rdp_event           => $event,
+        cookie              => $r->{cookie} // '',            # -> present + entropy
+        keyboard_layout     => $c->{keyboard_layout} // '',
+        client_build        => $c->{build} // '',
+        client_name         => $c->{client_name} // '',       # -> client_name_entropy
+        channel_count       => ref $r->{channels} eq 'ARRAY' ? scalar @{ $r->{channels} } : 0,
+        conn_rate           => $self->_rate( "rdp:conn:$src", $event eq 'initial_request' ),
+        # cannot tell a self-signed RDP cert from the EVE event alone.
+        self_signed_cert    => 0,
+    };
+}
+
+sub _extract_rfb {
+    my ( $self, $rec ) = @_;
+    my $r = $rec->{rfb} or return;
+    my $src = $rec->{src_ip} // '?';
+
+    my $sv   = ref $r->{server_protocol_version} eq 'HASH' ? $r->{server_protocol_version} : {};
+    my $ver  = defined $sv->{major} ? "$sv->{major}.$sv->{minor}" : ( $r->{server_protocol_version} // '' );
+    my $auth = ref $r->{authentication} eq 'HASH' ? $r->{authentication} : {};
+    my $srv  = ref $r->{server} eq 'HASH' ? $r->{server} : {};
+    my $area = ( $srv->{width} // 0 ) * ( $srv->{height} // 0 );
+
+    return {
+        rfb_version         => $ver,
+        security_type       => $auth->{security_type} // 0,
+        desktop_name        => $srv->{name} // '',   # -> desktop_name_entropy
+        screen_area         => $area,
+        shared_flag         => $r->{screen_shared} ? 1 : 0,
+        conn_rate           => $self->_rate( "rfb:conn:$src", 1 ),
+        # EVE does not flag a failed VNC auth on its own; left as a live meter
+        # that never marks rather than a fabricated signal.
+        auth_fail_rate      => $self->_rate( "rfb:fail:$src", 0 ),
+    };
+}
+
+sub _extract_mqtt {
+    my ( $self, $rec ) = @_;
+    my $q = $rec->{mqtt} or return;
+
+    # the control-packet type is whichever sub-object is present.
+    my $mtype = '';
+    for my $t (qw(connect connack publish puback pubrec pubrel pubcomp
+                  subscribe suback unsubscribe unsuback pingreq pingresp
+                  disconnect auth)) {
+        if ( ref $q->{$t} eq 'HASH' ) { $mtype = uc $t; last; }
+    }
+
+    my $conn    = ref $q->{connect} eq 'HASH' ? $q->{connect} : {};
+    my $pub     = ref $q->{publish} eq 'HASH' ? $q->{publish} : {};
+    my $sub     = ref $q->{subscribe} eq 'HASH' ? $q->{subscribe} : {};
+    my $connack = ref $q->{connack} eq 'HASH' ? $q->{connack} : {};
+
+    my $client = length( $conn->{client_id} // '' ) ? $conn->{client_id} : ( $rec->{src_ip} // '?' );
+
+    # topic from a PUBLISH, else the first SUBSCRIBE topic.
+    my $topic = $pub->{topic};
+    if ( !defined $topic && ref $sub->{topics} eq 'ARRAY' && ref $sub->{topics}[0] eq 'HASH' ) {
+        $topic = $sub->{topics}[0]{topic};
+    }
+    $topic //= '';
+
+    my $rc = $connack->{return_code} // $connack->{reason_code};
+    my $connack_fail = ( defined $rc && $rc ne '0' && lc "$rc" ne 'success' ) ? 1 : 0;
+
+    return {
+        mqtt_type        => $mtype,
+        topic            => $topic,     # -> length + depth + entropy
+        client_id        => $conn->{client_id} // '',   # -> client_id_entropy
+        payload_size     => length( $pub->{message} // '' ),
+        wildcard_sub     => ( $topic =~ /[#+]/ ) ? 1 : 0,
+        msg_rate         => $self->_rate( "mqtt:msg:$client", 1 ),
+        distinct_topics  => $self->_distinct_count( "mqtt:topic:$client", length $topic ? $topic : () ),
+        new_client_id    => $self->_first_seen( "mqtt:cid:" . ( $conn->{client_id} // '' ) ),
+        connack_fails    => $self->_rate( "mqtt:connack:$client", $connack_fail ),
+    };
+}
+
+sub _extract_quic {
+    my ( $self, $rec ) = @_;
+    my $u = $rec->{quic} or return;
+    my $src = $rec->{src_ip} // '?';
+
+    my $sni = $u->{sni} // '';
+    my $ja4 = $u->{ja4} // ( ref $u->{ja3} eq 'HASH' ? ( $u->{ja3}{hash} // '' ) : ( $u->{ja3} // '' ) );
+    my $cyu = ref $u->{cyu} eq 'ARRAY' && ref $u->{cyu}[0] eq 'HASH'
+        ? ( $u->{cyu}[0]{hash} // '' )
+        : ( $u->{cyu} // '' );
+
+    return {
+        quic_version   => $u->{version} // '',
+        ja4            => $ja4,
+        cyu            => $cyu,
+        sni            => $sni,           # -> sni_length + sni_entropy
+        sni_absent     => length $sni ? 0 : 1,
+        dest_fanout    => $self->_distinct_count( "quic:dest:$src", $rec->{dest_ip} // () ),
+        # up_to_down / duration / quic_tcp_ratio need the paired flow record,
+        # which is not part of a quic EVE event; use neutral placeholders.
+        up_to_down     => 1,
+        duration       => 0,
+        quic_tcp_ratio => 1,
+    };
+}
+
+sub _extract_ike {
+    my ( $self, $rec ) = @_;
+    my $i = _obj( $rec, 'ike', 'ikev2' ) or return;
+    my $src = $rec->{src_ip} // '?';
+
+    my $enc  = $i->{alg_enc} // '';
+    my $dh   = $i->{alg_dh}  // '';
+    my $dh_group = _digits($dh);
+    my @vids = ref $i->{vendor_ids} eq 'ARRAY' ? @{ $i->{vendor_ids} } : ();
+    my $weak = ( $enc =~ /\b(?:DES|3DES|NULL)\b/i || ( $dh_group && $dh_group < 2048 ) ) ? 1 : 0;
+
+    return {
+        ike_version     => _num( $i->{version_major} // $i->{version} ) // -1,
+        exchange_type   => _num( $i->{exchange_type} ) // -1,
+        enc_alg         => $enc,
+        dh_group        => $dh_group,
+        auth_method     => $i->{alg_auth} // '',
+        vendor_id       => $vids[0] // ( $i->{vendor_id} // '' ),
+        weak_proposal   => $weak,
+        init_rate       => $self->_rate( "ike:init:$src", ( $i->{message_id} // 0 ) == 0 ),
+        notify_fail_rate => $self->_rate( "ike:notify:$src", $i->{notify} ? 1 : 0 ),
+    };
+}
+
+sub _extract_pgsql {
+    my ( $self, $rec ) = @_;
+    my $p = $rec->{pgsql} or return;
+    my $src = $rec->{src_ip} // '?';
+
+    my $req    = ref $p->{request} eq 'HASH' ? $p->{request} : {};
+    my $resp   = ref $p->{response} eq 'HASH' ? $p->{response} : {};
+    my $params = ref $req->{startup_parameters} eq 'HASH' ? $req->{startup_parameters} : {};
+    my $query  = $req->{simple_query} // '';
+    my $err    = ref $resp->{error_response} eq 'HASH' ? $resp->{error_response}
+               : ( ref $resp->{error} eq 'HASH' ? $resp->{error} : undef );
+    my $errcode = $err ? ( $err->{code} // $err->{severity} // 'error' ) : undef;
+    my $is_authfail = ( $errcode && $errcode =~ /^28/ ) ? 1 : 0;   # SQLSTATE class 28
+
+    return {
+        msg_type        => $req->{message} // $resp->{message} // '',
+        user            => $params->{user} // '',       # -> user_entropy
+        database        => $params->{database} // '',
+        query_length    => length $query,
+        query_rate      => $self->_rate( "pgsql:q:$src", length $query ? 1 : 0 ),
+        auth_fail_rate  => $self->_rate( "pgsql:authf:$src", $is_authfail ),
+        error_rate      => $self->_rate( "pgsql:err:$src", defined $errcode ),
+        distinct_errors => $self->_distinct_count( "pgsql:derr:$src", defined $errcode ? $errcode : () ),
+    };
+}
+
+sub _extract_tftp {
+    my ( $self, $rec ) = @_;
+    my $t = $rec->{tftp} or return;
+    my $src = $rec->{src_ip} // '?';
+
+    my $opcode = $t->{packet} // '';
+
+    return {
+        tftp_opcode  => $opcode,
+        mode         => $t->{mode} // '',
+        filename     => $t->{file} // '',   # -> filename_length + filename_entropy
+        write_flag   => ( $opcode =~ /write/i ) ? 1 : 0,
+        request_rate => $self->_rate( "tftp:req:$src", 1 ),
+        error_rate   => $self->_rate( "tftp:err:$src", $opcode =~ /error/i ),
+    };
+}
+
+sub _extract_modbus {
+    my ( $self, $rec ) = @_;
+    my $m = $rec->{modbus} or return;
+    my $src = $rec->{src_ip} // '?';
+
+    my $func   = ref $m->{function} eq 'HASH' ? $m->{function} : {};
+    my $access = ref $m->{access}   eq 'HASH' ? $m->{access}   : {};
+    my $fname  = $func->{name} // '';
+    my $fcode  = $func->{code};
+    my $unit   = $m->{unit_id} // '';
+    my $is_write = ( $fname =~ /write/i
+        || ( defined $fcode && grep { $fcode == $_ } 5, 6, 15, 16 ) ) ? 1 : 0;
+
+    return {
+        function_code    => _num($fcode) // -1,   # numeric function code
+        unit_id          => $unit,
+        register_address => $access->{base} // $m->{address} // 0,
+        quantity         => $access->{quantity} // $m->{quantity} // 0,
+        write_flag       => $is_write,
+        command_rate     => $self->_rate( "modbus:cmd:$src", 1 ),
+        exception_rate   => $self->_rate( "modbus:exc:$src", ( defined $m->{exception} || ( $m->{reply} // '' ) =~ /exception/i ) ? 1 : 0 ),
+        new_master       => $self->_first_seen("modbus:pair:$src|$unit"),
+    };
+}
+
+sub _extract_dnp3 {
+    my ( $self, $rec ) = @_;
+    my $d = $rec->{dnp3} or return;
+    my $src = $rec->{src_ip} // '?';
+
+    my $app   = ref $d->{application} eq 'HASH' ? $d->{application} : {};
+    my $fname = $app->{function} // '';            # name, for flag classification
+    my $iin   = ref $d->{iin} eq 'HASH' && ref $d->{iin}{indicators} eq 'ARRAY'
+        ? scalar @{ $d->{iin}{indicators} } : 0;
+    my $link_src = $d->{src} // '';
+    my $link_dst = $d->{dst} // '';
+
+    return {
+        function_code => _num( $app->{function_code} ) // -1,   # set expects a number
+        dnp3_src      => "$link_src",
+        dnp3_dst      => "$link_dst",
+        iin_flags     => $iin,
+        control_flag  => ( $fname =~ /OPERATE|SELECT/i ) ? 1 : 0,
+        restart_flag  => ( $fname =~ /RESTART|DISABLE_UNSOLICITED/i ) ? 1 : 0,
+        command_rate  => $self->_rate( "dnp3:cmd:$src", 1 ),
+        new_pairing   => $self->_first_seen("dnp3:pair:$link_src|$link_dst"),
+    };
+}
+
+sub _extract_enip {
+    my ( $self, $rec ) = @_;
+    my $e = $rec->{enip} or return;
+    my $src = $rec->{src_ip} // '?';
+    my $dst = $rec->{dest_ip} // '?';
+
+    my $cip     = ref $e->{cip} eq 'HASH' ? $e->{cip} : {};
+    my $command = $e->{command} // $e->{enip_command} // '';
+    my $service = $cip->{service} // $e->{cip_service} // '';
+    my $status  = $cip->{status} // $e->{status};
+    my $path    = $cip->{path};
+    if ( !defined $path && ( defined $cip->{class} || defined $cip->{instance} ) ) {
+        $path = ( $cip->{class} // '' ) . '/' . ( $cip->{instance} // '' );
+    }
+    $path //= '';
+
+    return {
+        enip_command       => _num($command) // -1,   # numeric command
+        cip_service        => _num($service) // -1,    # numeric service
+        target_path        => "$path",
+        write_flag         => ( "$service" =~ /write|set/i ) ? 1 : 0,
+        status_fail        => ( defined $status && "$status" !~ /^(?:0|success)$/i ) ? 1 : 0,
+        command_rate       => $self->_rate( "enip:cmd:$src", 1 ),
+        list_identity_rate => $self->_rate( "enip:li:$src", "$command" =~ /list_?identity/i ),
+        new_source         => $self->_first_seen("enip:pair:$src|$dst"),
+    };
+}
+
+sub _extract_bittorrent_dht {
+    my ( $self, $rec ) = @_;
+    my $b = _obj( $rec, 'bittorrent_dht', 'bittorrent-dht' ) or return;
+    my $src = $rec->{src_ip} // '?';
+
+    my $request   = ref $b->{request} eq 'HASH' ? $b->{request} : {};
+    my $response  = ref $b->{response} eq 'HASH' ? $b->{response} : {};
+    my $req_type  = $b->{request_type} // '';
+    my $node_id   = $request->{id} // $response->{id} // '';
+    my $info_hash = $request->{info_hash} // '';
+
+    return {
+        request_type         => $req_type,
+        client_version       => $b->{client_version} // '',
+        node_id              => $node_id,   # -> node_id_entropy
+        announce_flag        => ( $req_type =~ /announce/i ) ? 1 : 0,
+        request_rate         => $self->_rate( "bt:req:$src", 1 ),
+        distinct_peers       => $self->_distinct_count( "bt:peer:$src", $rec->{dest_ip} // () ),
+        distinct_info_hashes => $self->_distinct_count( "bt:ih:$src", length $info_hash ? $info_hash : () ),
+    };
+}
+
 # --- helpers -----------------------------------------------------------------
 
 # A minimal per-key sliding-window events-per-second meter, replacing the
@@ -505,17 +1093,108 @@ sub _rate {
     return scalar(@$buf) / $window;
 }
 
-# Like _rate, but counts *distinct* values seen for $key within the window
-# (each value's timestamp refreshed on every sighting) and returns that count
-# per second. Used for SMTP distinct-recipient blast detection.
-sub _distinct_rate {
+# Number of *distinct* values seen for $key within the window (each value's
+# timestamp refreshed on every sighting, stale ones pruned). Marking with an
+# empty @values just prunes and reports the current distinct count, so a meter
+# can be read on every event and only fed on the events that matter.
+sub _distinct_count {
     my ( $self, $key, @values ) = @_;
     my $window = $self->{rate_window} || 1;
     my $now    = time();
     my $seen   = $self->{distinct}{$key} ||= {};
     $seen->{$_} = $now for @values;
     delete $seen->{$_} for grep { $seen->{$_} <= $now - $window } keys %$seen;
-    return scalar( keys %$seen ) / $window;
+    return scalar keys %$seen;
+}
+
+# _distinct_count expressed as a per-second rate (distinct SMTP recipients, ...).
+sub _distinct_rate {
+    my ( $self, $key, @values ) = @_;
+    return $self->_distinct_count( $key, @values ) / ( $self->{rate_window} || 1 );
+}
+
+# 1 the first time $key is ever seen this process, 0 afterwards. Backs the
+# various "new_*" / "first_seen" boolean features.
+sub _first_seen {
+    my ( $self, $key ) = @_;
+    return $self->{seen}{$key}++ ? 0 : 1;
+}
+
+# Running count of how many times $val has been seen in namespace $ns (the count
+# after recording this sighting). Backs frequency-prevalence features that have
+# no munger of their own.
+sub _freq {
+    my ( $self, $ns, $val ) = @_;
+    return ++$self->{freq}{$ns}{$val};
+}
+
+# Fetch the first EVE sub-object present under one of @keys (protocols whose
+# app-layer name and EVE key disagree, e.g. bittorrent_dht / ikev2).
+sub _obj {
+    my ( $rec, @keys ) = @_;
+    for my $key (@keys) {
+        return $rec->{$key} if ref $rec->{$key} eq 'HASH';
+    }
+    return undef;
+}
+
+# The /24 (IPv4) or /64-ish prefix of an address, for per-subnet grouping. Falls
+# back to the whole address for anything that is not dotted-quad.
+sub _subnet {
+    my ($ip) = @_;
+    return '' unless defined $ip && length $ip;
+    return "$1.0/24" if $ip =~ /^(\d+\.\d+\.\d+)\.\d+$/;
+    return $ip;
+}
+
+# Lower-cased final filename extension (no dot), or '' when there is none.
+sub _ext {
+    my ($filename) = @_;
+    return '' unless defined $filename && $filename =~ /\.([A-Za-z0-9]{1,8})$/;
+    return lc $1;
+}
+
+# Leading run of digits in a string as a number (MODP_1024 -> 1024), else 0.
+sub _digits {
+    my ($v) = @_;
+    return ( defined $v && $v =~ /(\d+)/ ) ? $1 : 0;
+}
+
+# A value as a plain number, or undef when it is absent / not numeric. Several
+# prototypes carry an "encoded" categorical (dnp3 function_code, enip command,
+# ike version, ...) with NO enum munger, so the set expects it already numeric.
+# The Zorita Writer wants every tag present and clean, so callers pair this with
+# a numeric "unknown" sentinel (`_num($x) // -1`) rather than passing a bare
+# string or undef, both of which the writer rejects.
+sub _num {
+    my ($v) = @_;
+    return ( defined $v && $v =~ /^-?\d+(?:\.\d+)?$/ ) ? $v + 0 : undef;
+}
+
+# Best-effort libmagic-type vs. extension disagreement, over a small table of
+# common types. Returns 0 (no evidence of mismatch) unless the extension is one
+# we know a signature keyword for and that keyword is absent from the magic.
+sub _magic_mismatch {
+    my ( $magic, $ext ) = @_;
+    return 0 unless defined $magic && length $magic && defined $ext && length $ext;
+    my %keyword = (
+        pdf  => 'PDF',      zip  => 'Zip',     gz   => 'gzip',
+        png  => 'PNG',      gif  => 'GIF',     jpg  => 'JPEG',
+        jpeg => 'JPEG',     exe  => 'executable', dll => 'executable',
+        elf  => 'ELF',      doc  => 'Composite', xls => 'Composite',
+    );
+    my $want = $keyword{$ext} or return 0;
+    return ( index( lc $magic, lc $want ) >= 0 ) ? 0 : 1;
+}
+
+# Map an EVE timestamp's time-of-day onto the unit circle (sin, cos over 24h),
+# so "3am" is near "3am" regardless of day. (0, 0) for an unparseable stamp.
+sub _time_circle {
+    my ($ts) = @_;
+    my $epoch = _epoch($ts);
+    return ( 0, 0 ) unless defined $epoch;
+    my $angle = 2 * 3.14159265358979 * ( $epoch % 86400 ) / 86400;
+    return ( sin($angle), cos($angle) );
 }
 
 # Reduce an address header ('"Name" <foo@bar>', '<foo@bar>', 'foo@bar') to the
