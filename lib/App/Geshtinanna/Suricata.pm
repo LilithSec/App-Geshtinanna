@@ -8,7 +8,7 @@ use Sys::Hostname qw(hostname);
 use Time::Local ();
 use JSON::MaybeXS qw(decode_json);
 use POE qw(Wheel::FollowTail);
-use Algorithm::EventsPerSecond ();
+use File::Path ();
 use Algorithm::Classifier::IsolationForest::Zorita ();
 use Algorithm::Classifier::IsolationForest::Zorita::Writer ();
 use Algorithm::Classifier::IsolationForest::Zorita::Online::Client ();
@@ -63,8 +63,9 @@ C<zorita streamd> daemon.
 
 The extractors here mirror the feature tables in the top-level F<README.md> and
 the writer input contract in F<share/set_info_jsons/online/README.md>. Only a
-representative handful (C<flow>, C<http>, C<dns>, C<tls>) are implemented so
-far; any other configured flow logs a one-time warning and is skipped. New
+representative handful (C<flow>, C<http>, C<dns>, C<tls>, C<smtp>) are
+implemented so far; any other configured flow logs a one-time warning and is
+skipped. New
 flows are added by writing one C<_extract_$flow> method and registering it in
 L</%EXTRACTORS>.
 
@@ -77,6 +78,7 @@ my %EXTRACTORS = (
     http => '_extract_http',
     dns  => '_extract_dns',
     tls  => '_extract_tls',
+    smtp => '_extract_smtp',
 );
 
 # set name -> EVE event_type, when they differ from the set name. Used only as
@@ -285,7 +287,15 @@ sub _sink {
 sub _zorita {
     my ( $self, $type ) = @_;
     my $key = "z_$type";
-    return $self->{$key} ||= Algorithm::Classifier::IsolationForest::Zorita->new(
+    return $self->{$key} if $self->{$key};
+
+    # Zorita writes its slug/set tree under basedir but will not create the
+    # basedir itself; make it (once) so a first run on a fresh host works.
+    if ( defined $self->{basedir} && length $self->{basedir} && !-d $self->{basedir} ) {
+        File::Path::make_path( $self->{basedir} );
+    }
+
+    return $self->{$key} = Algorithm::Classifier::IsolationForest::Zorita->new(
         ( defined $self->{basedir} ? ( basedir => $self->{basedir} ) : () ),
         ( $type eq 'online' ? ( type => 'online' ) : () ),
     );
@@ -360,8 +370,6 @@ sub _extract_http {
 
     # request rate per src/dst pair over the window
     my $pair = ( $rec->{src_ip} // '?' ) . '|' . ( $rec->{dest_ip} // '?' );
-    my $meter = $self->_meter( "http:req:$pair" );
-    $meter->mark;
 
     return {
         length       => $h->{length} // 0,
@@ -369,7 +377,7 @@ sub _extract_http {
         http_method   => $h->{http_method} // '',
         url           => $h->{url} // '',                 # -> url_* mungers
         user_agent    => $h->{http_user_agent} // '',     # -> ua_entropy
-        src_request_rate => $meter->rate,
+        src_request_rate => $self->_rate( "http:req:$pair", 1 ),
     };
 }
 
@@ -380,17 +388,16 @@ sub _extract_dns {
     # per-event set: score DNS queries (and answered queries carrying rcode)
     my $domain = $d->{rrname} // return;
 
-    # NXDOMAIN rate per client. Meter exists per client so rate() is always
-    # callable; we only mark it when this event is an NXDOMAIN.
+    # NXDOMAIN rate per client. We read the per-client rate on every query but
+    # only mark the meter when this particular event is an NXDOMAIN.
     my $client = $rec->{src_ip} // '?';
-    my $meter  = $self->_meter( "dns:nx:$client" );
     my $rcode  = uc( $d->{rcode} // '' );
-    $meter->mark if $rcode eq 'NXDOMAIN';
+    my $nxdomain_rate = $self->_rate( "dns:nx:$client", $rcode eq 'NXDOMAIN' );
 
     return {
         domain        => $domain,             # -> entropy + domain_length + label_count
         rrtype        => $d->{rrtype} // '',
-        nxdomain_rate => $meter->rate,
+        nxdomain_rate => $nxdomain_rate,
         ttl            => $d->{ttl} // 0,
         answer_count   => ref $d->{answers} eq 'ARRAY' ? scalar @{ $d->{answers} } : 0,
     };
@@ -426,13 +433,82 @@ sub _extract_tls {
     };
 }
 
+sub _extract_smtp {
+    my ( $self, $rec ) = @_;
+    my $s = $rec->{smtp} or return;
+    my $email = ref $rec->{email} eq 'HASH' ? $rec->{email} : {};
+
+    my $helo      = $s->{helo}      // '';
+    my $mail_from = $s->{mail_from} // '';
+    my @rcpts     = ref $s->{rcpt_to} eq 'ARRAY' ? @{ $s->{rcpt_to} } : ();
+
+    # distinct recipients per sender over the window (mass-mailing / spam).
+    my $sender = length $mail_from ? lc $mail_from : ( $rec->{src_ip} // '?' );
+    my $distinct_rcpt_rate =
+        $self->_distinct_rate( "smtp:rcpt:$sender", map { lc } @rcpts );
+
+    # header From (email.from) vs envelope MAIL FROM: a spoofing signal. Only
+    # meaningful when email metadata was extracted; unknown -> not a mismatch.
+    my $hdr_from = $email->{from};
+    $hdr_from = $hdr_from->[0] if ref $hdr_from eq 'ARRAY';
+    my $from_mismatch =
+        ( length $mail_from && defined $hdr_from && length $hdr_from )
+        ? ( _addr($hdr_from) ne _addr($mail_from) ? 1 : 0 )
+        : 0;
+
+    my @attach = ref $email->{attachment} eq 'ARRAY' ? @{ $email->{attachment} } : ();
+    my @urls   = ref $email->{url}        eq 'ARRAY' ? @{ $email->{url} }        : ();
+
+    return {
+        helo               => $helo,               # -> helo_length + helo_entropy
+        mail_from          => $mail_from,          # -> mail_from_entropy
+        subject            => $email->{subject} // '',   # -> subject_entropy
+        rcpt_count         => scalar @rcpts,
+        distinct_rcpt_rate => $distinct_rcpt_rate,
+        from_mismatch      => $from_mismatch,
+        attachment_count   => scalar @attach,
+        attachment_bytes   => 0,   # EVE carries no per-attachment sizes
+        url_count          => scalar @urls,
+    };
+}
+
 # --- helpers -----------------------------------------------------------------
 
-# A per-key Algorithm::EventsPerSecond meter (created on first use).
-sub _meter {
-    my ( $self, $key ) = @_;
-    return $self->{rates}{$key} ||= Algorithm::EventsPerSecond->new(
-        window => $self->{rate_window} );
+# A minimal per-key sliding-window events-per-second meter, replacing the
+# external Algorithm::EventsPerSecond dependency: record "now" when $do_mark is
+# true, prune anything older than rate_window, and return the events per second
+# over that window. State lives in $self->{rates}{$key} as an arrayref of epochs.
+sub _rate {
+    my ( $self, $key, $do_mark ) = @_;
+    my $window = $self->{rate_window} || 1;
+    my $now    = time();
+    my $buf    = $self->{rates}{$key} ||= [];
+    push @$buf, $now if $do_mark;
+    shift @$buf while @$buf && $buf->[0] <= $now - $window;
+    return scalar(@$buf) / $window;
+}
+
+# Like _rate, but counts *distinct* values seen for $key within the window
+# (each value's timestamp refreshed on every sighting) and returns that count
+# per second. Used for SMTP distinct-recipient blast detection.
+sub _distinct_rate {
+    my ( $self, $key, @values ) = @_;
+    my $window = $self->{rate_window} || 1;
+    my $now    = time();
+    my $seen   = $self->{distinct}{$key} ||= {};
+    $seen->{$_} = $now for @values;
+    delete $seen->{$_} for grep { $seen->{$_} <= $now - $window } keys %$seen;
+    return scalar( keys %$seen ) / $window;
+}
+
+# Reduce an address header ('"Name" <foo@bar>', '<foo@bar>', 'foo@bar') to the
+# bare, lowercased addr-spec for envelope-vs-header comparison.
+sub _addr {
+    my ($v) = @_;
+    return '' unless defined $v;
+    $v = $1 if $v =~ /<([^>]*)>/;
+    $v =~ s/^\s+|\s+$//g;
+    return lc $v;
 }
 
 sub _warn_once {

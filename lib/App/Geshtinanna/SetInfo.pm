@@ -6,6 +6,7 @@ use warnings;
 use Carp   qw(croak);
 use JSON::MaybeXS ();
 use File::Spec;
+use File::Path ();
 use Algorithm::Classifier::IsolationForest::Zorita ();
 
 =head1 NAME
@@ -115,6 +116,11 @@ sub install {
     my $flows = $args{flows} or croak 'install: flows required';
     my $share = $args{share} or croak 'install: share dir required';
     my $slug  = $args{slug}  // 'suricata';
+
+    # Zorita will not create its own basedir; make it before writing any set.
+    if ( defined $args{basedir} && length $args{basedir} && !-d $args{basedir} ) {
+        File::Path::make_path( $args{basedir} );
+    }
 
     my $json = JSON::MaybeXS->new->utf8;
     my %z;   # cache Zorita objects by mode
