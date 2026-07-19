@@ -1,0 +1,50 @@
+{
+   "class" : "batch",
+   "format" : "Algorithm::Classifier::IsolationForest::Prototype",
+   "params" : {
+      "contamination" : 0.01,
+      "extension_level" : 0,
+      "max_depth" : null,
+      "mode" : "axis",
+      "n_trees" : 100,
+      "sample_size" : 256,
+      "seed" : 42,
+      "voting" : "soft"
+   },
+   "schema" : {
+      "feature_descriptions" : {
+         "arp_opcode" : "encoded opcode (request vs. reply)",
+         "ips_per_mac" : "distinct IPs claimed by one MAC over the window (impersonation / scan)",
+         "macs_per_ip" : "distinct MACs claiming one IP over the window (spoofing / poisoning)",
+         "new_mac_ip" : "boolean: first time this MAC ↔ IP binding is seen",
+         "reply_rate" : "ARP replies per source MAC over the window (gratuitous-reply flood)",
+         "request_rate" : "ARP requests per source over the window (address scanning)",
+         "unsolicited_flag" : "boolean: reply with no preceding request (gratuitous ARP)"
+      },
+      "feature_names" : [
+         "arp_opcode",
+         "reply_rate",
+         "unsolicited_flag",
+         "macs_per_ip",
+         "ips_per_mac",
+         "request_rate",
+         "new_mac_ip"
+      ],
+      "missing" : "nan",
+      "mungers" : {
+         "arp_opcode" : {
+            "default" : -1,
+            "map" : {
+               "reply" : 1,
+               "request" : 0,
+               "reverse_reply" : 3,
+               "reverse_request" : 2
+            },
+            "munger" : "enum"
+         }
+      }
+   },
+   "schema_description" : "(batch) Suricata ARP set: opcode and behavioral MAC/IP binding features for spoofing detection",
+   "schema_version" : "2026.07.09-1-batch",
+   "version" : 1
+}

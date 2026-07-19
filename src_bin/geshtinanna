@@ -1,0 +1,41 @@
+#!/usr/bin/env perl
+
+use 5.006;
+use strict;
+use warnings;
+
+use App::Geshtinanna::CLI;
+
+App::Geshtinanna::CLI->run;
+
+__END__
+
+=head1 NAME
+
+geshtinanna - Ingest Suricata/LibreNMS telemetry into online Isolation Forest models.
+
+=head1 SYNOPSIS
+
+    geshtinanna suricata --help
+    geshtinanna suricata --setup            # install Zorita sets, then follow
+    geshtinanna suricata                    # follow enabled EVE flows into Zorita
+
+=head1 DESCRIPTION
+
+Command-line front end for L<App::Geshtinanna>. See C<geshtinanna commands> for
+the available subcommands. Configuration is read from
+F</usr/local/etc/geshtinanna.toml> by default (see L<App::Geshtinanna::Config>).
+
+=head1 AUTHOR
+
+Zane C. Bowers-Hadley, C<< <vvelox at vvelox.net> >>
+
+=head1 LICENSE AND COPYRIGHT
+
+This software is Copyright (c) 2026 by Zane C. Bowers-Hadley.
+
+This program is released under the following license:
+
+  agpl
+
+=cut

@@ -1,0 +1,89 @@
+{
+   "class" : "batch",
+   "format" : "Algorithm::Classifier::IsolationForest::Prototype",
+   "params" : {
+      "contamination" : 0.01,
+      "extension_level" : 0,
+      "max_depth" : null,
+      "mode" : "axis",
+      "n_trees" : 100,
+      "sample_size" : 256,
+      "seed" : 42,
+      "voting" : "soft"
+   },
+   "schema" : {
+      "feature_descriptions" : {
+         "http_method" : "encoded method (rare methods PUT/DELETE/TRACE stand out)",
+         "length" : "body size (log-transformed)",
+         "src_request_rate" : "request rate per src/dst pair over the window",
+         "status" : "encoded / bucketed 2xx·3xx·4xx·5xx",
+         "ua_entropy" : "Shannon entropy of the User-Agent string",
+         "url_length" : "length of the request URI",
+         "url_non_alnum" : "fraction of non-alphanumeric characters in the URI",
+         "url_path_depth" : "path depth (count of `/` segments)"
+      },
+      "feature_names" : [
+         "length",
+         "status",
+         "http_method",
+         "url_length",
+         "url_path_depth",
+         "url_non_alnum",
+         "ua_entropy",
+         "src_request_rate"
+      ],
+      "missing" : "nan",
+      "mungers" : {
+         "http_method" : {
+            "default" : -1,
+            "map" : {
+               "CONNECT" : 8,
+               "COPY" : 12,
+               "DELETE" : 4,
+               "GET" : 0,
+               "HEAD" : 2,
+               "LOCK" : 13,
+               "MKCOL" : 10,
+               "MOVE" : 11,
+               "OPTIONS" : 5,
+               "PATCH" : 6,
+               "POST" : 1,
+               "PROPFIND" : 9,
+               "PUT" : 3,
+               "TRACE" : 7,
+               "UNLOCK" : 14
+            },
+            "munger" : "enum"
+         },
+         "length" : {
+            "munger" : "log",
+            "offset" : 1
+         },
+         "status" : {
+            "munger" : "http_enum"
+         },
+         "ua_entropy" : {
+            "from" : "user_agent",
+            "munger" : "entropy"
+         },
+         "url_length" : {
+            "from" : "url",
+            "munger" : "length"
+         },
+         "url_non_alnum" : {
+            "class" : "non_alnum",
+            "from" : "url",
+            "mode" : "ratio",
+            "munger" : "char"
+         },
+         "url_path_depth" : {
+            "from" : "url",
+            "munger" : "count",
+            "of" : "/"
+         }
+      }
+   },
+   "schema_description" : "(batch) Suricata HTTP set: request/response shape, URL injection features, User-Agent entropy, request rate",
+   "schema_version" : "2026.07.09-1-batch",
+   "version" : 1
+}

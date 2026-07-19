@@ -1,0 +1,52 @@
+{
+   "class": "online",
+   "format": "Algorithm::Classifier::IsolationForest::Prototype",
+   "params": {
+      "contamination": 0.01,
+      "growth": "adaptive",
+      "max_leaf_samples": 32,
+      "n_trees": 100,
+      "seed": 42,
+      "window_size": 4096
+   },
+   "schema": {
+      "feature_descriptions": {
+         "community_entropy": "Shannon entropy of the community string (guessing past public/private)",
+         "community_present": "boolean: community string present (v1 / v2c)",
+         "distinct_oids": "distinct OIDs queried per source over the window (full-tree walk)",
+         "error_rate": "SNMP error responses per source over the window (noAccess / authFail probing)",
+         "pdu_type": "encoded PDU (get / getnext / getbulk / set / trap / response)",
+         "request_rate": "SNMP requests per source over the window (walk / enumeration)",
+         "set_rate": "SET requests per source over the window (config tampering)",
+         "snmp_version": "encoded version (v1 / v2c = cleartext community; v3 = auth)"
+      },
+      "feature_names": [
+         "snmp_version",
+         "pdu_type",
+         "request_rate",
+         "community_present",
+         "community_entropy",
+         "set_rate",
+         "distinct_oids",
+         "error_rate"
+      ],
+      "missing": "zero",
+      "mungers": {
+         "community_entropy": {
+            "from": "community",
+            "munger": "entropy"
+         },
+         "community_present": {
+            "from": "community",
+            "munger": "bool"
+         },
+         "pdu_type": {
+            "buckets": 32,
+            "munger": "hash"
+         }
+      }
+   },
+   "schema_description": "Suricata SNMP set: version/PDU, request/set/error rates, community and OID features",
+   "schema_version": "2026.07.09-1",
+   "version": 1
+}

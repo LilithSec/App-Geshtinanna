@@ -1,0 +1,88 @@
+{
+   "class": "online",
+   "format": "Algorithm::Classifier::IsolationForest::Prototype",
+   "params": {
+      "contamination": 0.01,
+      "growth": "adaptive",
+      "max_leaf_samples": 32,
+      "n_trees": 100,
+      "seed": 42,
+      "window_size": 4096
+   },
+   "schema": {
+      "feature_descriptions": {
+         "client_id_entropy": "Shannon entropy of `connect.client_id`",
+         "connack_fails": "CONNACK reason codes != 0 per client over the window (auth failures)",
+         "distinct_topics": "distinct topics per client over the window (enumeration)",
+         "mqtt_type": "encoded control-packet type (CONNECT/PUBLISH/SUBSCRIBE/…)",
+         "msg_rate": "MQTT messages per client over the window",
+         "new_client_id": "boolean: first time this `client_id` is seen",
+         "payload_size": "PUBLISH payload size, log-transformed",
+         "topic_depth": "topic hierarchy depth (count of `/` levels)",
+         "topic_entropy": "Shannon entropy of the topic",
+         "topic_length": "length of the topic string",
+         "wildcard_sub": "boolean: subscription topic contains `#` or `+`"
+      },
+      "feature_names": [
+         "mqtt_type",
+         "msg_rate",
+         "payload_size",
+         "topic_length",
+         "topic_depth",
+         "topic_entropy",
+         "wildcard_sub",
+         "distinct_topics",
+         "client_id_entropy",
+         "new_client_id",
+         "connack_fails"
+      ],
+      "missing": "zero",
+      "mungers": {
+         "client_id_entropy": {
+            "from": "client_id",
+            "munger": "entropy"
+         },
+         "mqtt_type": {
+            "default": -1,
+            "map": {
+               "AUTH": 15,
+               "CONNACK": 2,
+               "CONNECT": 1,
+               "DISCONNECT": 14,
+               "PINGREQ": 12,
+               "PINGRESP": 13,
+               "PUBACK": 4,
+               "PUBCOMP": 7,
+               "PUBLISH": 3,
+               "PUBREC": 5,
+               "PUBREL": 6,
+               "SUBACK": 9,
+               "SUBSCRIBE": 8,
+               "UNSUBACK": 11,
+               "UNSUBSCRIBE": 10
+            },
+            "munger": "enum"
+         },
+         "payload_size": {
+            "munger": "log",
+            "offset": 1
+         },
+         "topic_depth": {
+            "from": "topic",
+            "munger": "count",
+            "of": "/"
+         },
+         "topic_entropy": {
+            "from": "topic",
+            "munger": "entropy"
+         },
+         "topic_length": {
+            "from": "topic",
+            "munger": "length"
+         }
+      }
+   },
+   "schema_description": "Suricata MQTT set: control-packet mix, message/topic shape, client identity, CONNACK failures",
+   "schema_version": "2026.07.09-1",
+   "version": 1
+}

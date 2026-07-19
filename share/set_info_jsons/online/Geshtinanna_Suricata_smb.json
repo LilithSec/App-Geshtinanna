@@ -1,0 +1,73 @@
+{
+   "class": "online",
+   "format": "Algorithm::Classifier::IsolationForest::Prototype",
+   "params": {
+      "contamination": 0.01,
+      "growth": "adaptive",
+      "max_leaf_samples": 32,
+      "n_trees": 100,
+      "seed": 42,
+      "window_size": 4096
+   },
+   "schema": {
+      "feature_descriptions": {
+         "admin_share": "boolean: access to an admin share (`ADMIN$`, `C$`, `IPC$`)",
+         "dialect": "encoded negotiated dialect (SMBv1 is anomalous)",
+         "distinct_files": "distinct files touched per host over the window",
+         "distinct_shares": "distinct shares accessed per host over the window",
+         "filename_entropy": "Shannon entropy of the filename",
+         "named_pipe": "frequency-encoded named pipe (`svcctl`/`samr`/`lsarpc`/`atsvc` = tooling)",
+         "ntlm_host_entropy": "Shannon entropy of the NTLMSSP hostname (random tooling hostnames)",
+         "smb_command": "encoded SMB command (Create/Read/Write/Rename/Delete/TreeConnect/…)",
+         "status_fail": "boolean: response status is an error (access-denied probing)",
+         "write_delete_rate": "write + rename + delete ops per host over the window (ransomware)"
+      },
+      "feature_names": [
+         "smb_command",
+         "dialect",
+         "status_fail",
+         "named_pipe",
+         "admin_share",
+         "distinct_shares",
+         "distinct_files",
+         "write_delete_rate",
+         "filename_entropy",
+         "ntlm_host_entropy"
+      ],
+      "missing": "zero",
+      "mungers": {
+         "dialect": {
+            "default": -1,
+            "map": {
+               "2.02": 1,
+               "2.10": 2,
+               "2.??": 3,
+               "3.00": 4,
+               "3.02": 5,
+               "3.11": 6,
+               "NT LM 0.12": 0
+            },
+            "munger": "enum"
+         },
+         "filename_entropy": {
+            "from": "filename",
+            "munger": "entropy"
+         },
+         "named_pipe": {
+            "buckets": 256,
+            "munger": "hash"
+         },
+         "ntlm_host_entropy": {
+            "from": "ntlm_host",
+            "munger": "entropy"
+         },
+         "smb_command": {
+            "buckets": 64,
+            "munger": "hash"
+         }
+      }
+   },
+   "schema_description": "Suricata SMB set: command/dialect, lateral-movement pipes and shares, ransomware volume features",
+   "schema_version": "2026.07.09-1",
+   "version": 1
+}

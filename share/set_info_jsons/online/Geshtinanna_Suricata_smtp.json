@@ -1,0 +1,64 @@
+{
+   "class": "online",
+   "format": "Algorithm::Classifier::IsolationForest::Prototype",
+   "params": {
+      "contamination": 0.01,
+      "growth": "adaptive",
+      "max_leaf_samples": 32,
+      "n_trees": 100,
+      "seed": 42,
+      "window_size": 4096
+   },
+   "schema": {
+      "feature_descriptions": {
+         "attachment_bytes": "total attachment size, log-transformed",
+         "attachment_count": "number of attachments on the message",
+         "distinct_rcpt_rate": "distinct recipients per sender over the window (blast / spam)",
+         "from_mismatch": "boolean: envelope MAIL FROM != header `From` (spoofing)",
+         "helo_entropy": "Shannon entropy of the HELO string (randomized botnet HELOs)",
+         "helo_length": "length of the HELO/EHLO string",
+         "mail_from_entropy": "Shannon entropy of the MAIL FROM localpart",
+         "rcpt_count": "number of RCPT TO recipients on the message",
+         "subject_entropy": "Shannon entropy of the subject",
+         "url_count": "count of URLs in the body (phishing)"
+      },
+      "feature_names": [
+         "helo_length",
+         "helo_entropy",
+         "rcpt_count",
+         "distinct_rcpt_rate",
+         "mail_from_entropy",
+         "from_mismatch",
+         "subject_entropy",
+         "attachment_count",
+         "attachment_bytes",
+         "url_count"
+      ],
+      "missing": "zero",
+      "mungers": {
+         "attachment_bytes": {
+            "munger": "log",
+            "offset": 1
+         },
+         "helo_entropy": {
+            "from": "helo",
+            "munger": "entropy"
+         },
+         "helo_length": {
+            "from": "helo",
+            "munger": "length"
+         },
+         "mail_from_entropy": {
+            "from": "mail_from",
+            "munger": "entropy"
+         },
+         "subject_entropy": {
+            "from": "subject",
+            "munger": "entropy"
+         }
+      }
+   },
+   "schema_description": "Suricata SMTP set: envelope and header shape, recipient volume, spoofing and attachment features",
+   "schema_version": "2026.07.09-1",
+   "version": 1
+}

@@ -1,0 +1,56 @@
+{
+   "class": "online",
+   "format": "Algorithm::Classifier::IsolationForest::Prototype",
+   "params": {
+      "contamination": 0.01,
+      "growth": "adaptive",
+      "max_leaf_samples": 32,
+      "n_trees": 100,
+      "seed": 42,
+      "window_size": 4096
+   },
+   "schema": {
+      "feature_descriptions": {
+         "auth_fail_rate": "authentication-failure responses per source over the window (brute force)",
+         "database": "frequency-encoded target database name",
+         "distinct_errors": "distinct SQLSTATE codes per source over the window (injection fuzzing)",
+         "error_rate": "ErrorResponse messages per source over the window (SQLi probing / bad syntax)",
+         "msg_type": "encoded message type (Startup / Query / Auth / Error / …)",
+         "query_length": "simple-query string length, log-transformed",
+         "query_rate": "queries per source over the window",
+         "user_entropy": "Shannon entropy of the startup user name"
+      },
+      "feature_names": [
+         "msg_type",
+         "query_rate",
+         "auth_fail_rate",
+         "error_rate",
+         "distinct_errors",
+         "user_entropy",
+         "database",
+         "query_length"
+      ],
+      "missing": "zero",
+      "mungers": {
+         "database": {
+            "buckets": 256,
+            "munger": "hash"
+         },
+         "msg_type": {
+            "buckets": 64,
+            "munger": "hash"
+         },
+         "query_length": {
+            "munger": "log",
+            "offset": 1
+         },
+         "user_entropy": {
+            "from": "user",
+            "munger": "entropy"
+         }
+      }
+   },
+   "schema_description": "Suricata PostgreSQL set: message type, auth/error rates, error diversity, query shape",
+   "schema_version": "2026.07.09-1",
+   "version": 1
+}

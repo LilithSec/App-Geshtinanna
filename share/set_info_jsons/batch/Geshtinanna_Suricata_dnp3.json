@@ -1,0 +1,51 @@
+{
+   "class" : "batch",
+   "format" : "Algorithm::Classifier::IsolationForest::Prototype",
+   "params" : {
+      "contamination" : 0.01,
+      "extension_level" : 0,
+      "max_depth" : null,
+      "mode" : "axis",
+      "n_trees" : 100,
+      "sample_size" : 256,
+      "seed" : 42,
+      "voting" : "soft"
+   },
+   "schema" : {
+      "feature_descriptions" : {
+         "command_rate" : "requests per master over the window (baseline vs. flood)",
+         "control_flag" : "boolean: a control function (OPERATE / DIRECT_OPERATE / SELECT)",
+         "dnp3_dst" : "frequency-encoded DNP3 destination (link) address",
+         "dnp3_src" : "frequency-encoded DNP3 source (link) address",
+         "function_code" : "encoded application function (READ/WRITE/OPERATE/SELECT/RESTART/…)",
+         "iin_flags" : "encoded internal-indication flags (device-restart / parameter-error bits)",
+         "new_pairing" : "boolean: first time this src ↔ dst pair is seen",
+         "restart_flag" : "boolean: a restart / disable function (COLD_RESTART / DISABLE_UNSOLICITED)"
+      },
+      "feature_names" : [
+         "function_code",
+         "control_flag",
+         "restart_flag",
+         "command_rate",
+         "dnp3_src",
+         "dnp3_dst",
+         "iin_flags",
+         "new_pairing"
+      ],
+      "missing" : "nan",
+      "mungers" : {
+         "dnp3_dst" : {
+            "buckets" : 256,
+            "munger" : "hash",
+            "seed" : 1
+         },
+         "dnp3_src" : {
+            "buckets" : 256,
+            "munger" : "hash"
+         }
+      }
+   },
+   "schema_description" : "(batch) Suricata DNP3 ICS set: function code, control/restart flags, link addresses, behavioral rates",
+   "schema_version" : "2026.07.09-1-batch",
+   "version" : 1
+}

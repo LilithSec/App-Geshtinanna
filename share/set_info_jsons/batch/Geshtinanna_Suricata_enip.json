@@ -1,0 +1,46 @@
+{
+   "class" : "batch",
+   "format" : "Algorithm::Classifier::IsolationForest::Prototype",
+   "params" : {
+      "contamination" : 0.01,
+      "extension_level" : 0,
+      "max_depth" : null,
+      "mode" : "axis",
+      "n_trees" : 100,
+      "sample_size" : 256,
+      "seed" : 42,
+      "voting" : "soft"
+   },
+   "schema" : {
+      "feature_descriptions" : {
+         "cip_service" : "encoded CIP service (read tag / write tag / forward-open / reset)",
+         "command_rate" : "ENIP / CIP requests per source over the window (baseline vs. flood)",
+         "enip_command" : "encoded ENIP command (register_session / list_identity / send_rr_data / …)",
+         "list_identity_rate" : "ListIdentity requests per source over the window (device discovery)",
+         "new_source" : "boolean: first time this source talks to this device",
+         "status_fail" : "boolean: non-success ENIP / CIP status (probing)",
+         "target_path" : "frequency-encoded CIP class / instance path (unexpected object target)",
+         "write_flag" : "boolean: a CIP write / set service (tag write, attribute set)"
+      },
+      "feature_names" : [
+         "enip_command",
+         "cip_service",
+         "write_flag",
+         "command_rate",
+         "list_identity_rate",
+         "target_path",
+         "status_fail",
+         "new_source"
+      ],
+      "missing" : "nan",
+      "mungers" : {
+         "target_path" : {
+            "buckets" : 256,
+            "munger" : "hash"
+         }
+      }
+   },
+   "schema_description" : "(batch) Suricata EtherNet/IP + CIP ICS set: commands/services, tag-write tampering, discovery rate",
+   "schema_version" : "2026.07.09-1-batch",
+   "version" : 1
+}

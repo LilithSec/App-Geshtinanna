@@ -1,0 +1,76 @@
+{
+   "class" : "batch",
+   "format" : "Algorithm::Classifier::IsolationForest::Prototype",
+   "params" : {
+      "contamination" : 0.01,
+      "extension_level" : 0,
+      "max_depth" : null,
+      "mode" : "axis",
+      "n_trees" : 100,
+      "sample_size" : 256,
+      "seed" : 42,
+      "voting" : "soft"
+   },
+   "schema" : {
+      "feature_descriptions" : {
+         "channel_count" : "number of requested virtual channels",
+         "client_build" : "frequency-encoded client build / product id (rare / old / tooling)",
+         "client_name_entropy" : "Shannon entropy of the client machine name",
+         "conn_rate" : "RDP connections per source over the window (brute force)",
+         "cookie_entropy" : "Shannon entropy of the cookie (the attempted username)",
+         "cookie_present" : "boolean: mstshash cookie present",
+         "keyboard_layout" : "frequency-encoded client keyboard layout (foreign locale = interesting)",
+         "rdp_event" : "encoded event type (initial_request/connect_response/tls_handshake/…)",
+         "self_signed_cert" : "boolean: RDP-over-TLS cert is self-signed (default RDP cert)"
+      },
+      "feature_names" : [
+         "rdp_event",
+         "conn_rate",
+         "cookie_present",
+         "cookie_entropy",
+         "keyboard_layout",
+         "client_build",
+         "client_name_entropy",
+         "channel_count",
+         "self_signed_cert"
+      ],
+      "missing" : "nan",
+      "mungers" : {
+         "client_build" : {
+            "buckets" : 256,
+            "munger" : "hash",
+            "seed" : 1
+         },
+         "client_name_entropy" : {
+            "from" : "client_name",
+            "munger" : "entropy"
+         },
+         "cookie_entropy" : {
+            "from" : "cookie",
+            "munger" : "entropy"
+         },
+         "cookie_present" : {
+            "from" : "cookie",
+            "munger" : "bool"
+         },
+         "keyboard_layout" : {
+            "buckets" : 256,
+            "munger" : "hash"
+         },
+         "rdp_event" : {
+            "default" : -1,
+            "map" : {
+               "connect_request" : 2,
+               "connect_response" : 3,
+               "initial_request" : 0,
+               "initial_response" : 1,
+               "tls_handshake" : 4
+            },
+            "munger" : "enum"
+         }
+      }
+   },
+   "schema_description" : "(batch) Suricata RDP set: negotiation event, connection rate, cookie and client-fingerprint features",
+   "schema_version" : "2026.07.09-1-batch",
+   "version" : 1
+}

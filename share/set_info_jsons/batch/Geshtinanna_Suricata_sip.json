@@ -1,0 +1,77 @@
+{
+   "class" : "batch",
+   "format" : "Algorithm::Classifier::IsolationForest::Prototype",
+   "params" : {
+      "contamination" : 0.01,
+      "extension_level" : 0,
+      "max_depth" : null,
+      "mode" : "axis",
+      "n_trees" : 100,
+      "sample_size" : 256,
+      "seed" : 42,
+      "voting" : "soft"
+   },
+   "schema" : {
+      "feature_descriptions" : {
+         "auth_fail_rate" : "401/403/407 responses per source over the window (registration brute force)",
+         "distinct_uris" : "distinct target URIs per source over the window (extension scanning)",
+         "request_rate" : "SIP requests per source over the window (INVITE / REGISTER floods)",
+         "response_code" : "bucketed response code (2xx / 4xx / 5xx)",
+         "sip_method" : "encoded method (INVITE/REGISTER/OPTIONS/BYE/…)",
+         "uri_user_entropy" : "Shannon entropy of the URI user part",
+         "uri_user_length" : "length of the URI user part",
+         "user_agent" : "frequency-encoded User-Agent (sipvicious / friendly-scanner = tooling)"
+      },
+      "feature_names" : [
+         "sip_method",
+         "request_rate",
+         "response_code",
+         "auth_fail_rate",
+         "uri_user_length",
+         "uri_user_entropy",
+         "distinct_uris",
+         "user_agent"
+      ],
+      "missing" : "nan",
+      "mungers" : {
+         "response_code" : {
+            "munger" : "sip_enum"
+         },
+         "sip_method" : {
+            "default" : -1,
+            "map" : {
+               "ACK" : 3,
+               "BYE" : 4,
+               "CANCEL" : 5,
+               "INFO" : 8,
+               "INVITE" : 0,
+               "MESSAGE" : 9,
+               "NOTIFY" : 7,
+               "OPTIONS" : 2,
+               "PRACK" : 11,
+               "PUBLISH" : 13,
+               "REFER" : 12,
+               "REGISTER" : 1,
+               "SUBSCRIBE" : 6,
+               "UPDATE" : 10
+            },
+            "munger" : "enum"
+         },
+         "uri_user_entropy" : {
+            "from" : "uri_user",
+            "munger" : "entropy"
+         },
+         "uri_user_length" : {
+            "from" : "uri_user",
+            "munger" : "length"
+         },
+         "user_agent" : {
+            "buckets" : 256,
+            "munger" : "hash"
+         }
+      }
+   },
+   "schema_description" : "(batch) Suricata SIP set: method, request/response rates, URI-user shape, scanner User-Agent",
+   "schema_version" : "2026.07.09-1-batch",
+   "version" : 1
+}

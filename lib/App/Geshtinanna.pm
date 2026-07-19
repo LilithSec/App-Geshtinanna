@@ -19,35 +19,35 @@ our $VERSION = '0.0.1';
 
 =head1 SYNOPSIS
 
-Quick summary of what the module does.
+App::Geshtinanna ingests data from Suricata (and, planned, LibreNMS) into online
+Isolation Forest models for anomaly detection, backed by
+L<Algorithm::Classifier::IsolationForest::Zorita>.
 
-Perhaps a little code snippet.
+This package is the distribution namespace and version anchor. The working parts
+live in its submodules and the C<geshtinanna> command:
 
-    use App::Geshtinanna;
+=over 4
 
-    my $foo = App::Geshtinanna->new();
-    ...
+=item * L<App::Geshtinanna::Config> - load F</usr/local/etc/geshtinanna.toml>.
 
-=head1 EXPORT
+=item * L<App::Geshtinanna::Suricata> - a L<POE> engine that tails Suricata EVE
+flow logs and feeds each event into a Zorita set.
 
-A list of functions that can be exported.  You can delete this section
-if you don't export anything, such as for a purely object-oriented module.
+=item * L<App::Geshtinanna::SetInfo> - install the shipped set prototypes
+(F<share/set_info_jsons/>) as Zorita sets.
 
-=head1 SUBROUTINES/METHODS
+=item * L<App::Geshtinanna::CLI> - the C<geshtinanna> command dispatcher.
 
-=head2 function1
+=back
 
-=cut
+    use App::Geshtinanna::Config;
+    use App::Geshtinanna::Suricata;
 
-sub function1 {
-}
-
-=head2 function2
-
-=cut
-
-sub function2 {
-}
+    my $config = App::Geshtinanna::Config->load;
+    App::Geshtinanna::Suricata->new(
+        suricata => $config->{suricata},
+        basedir  => $config->{zorita}{basedir},
+    )->run;
 
 =head1 AUTHOR
 

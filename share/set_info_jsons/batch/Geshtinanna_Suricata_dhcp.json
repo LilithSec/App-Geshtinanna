@@ -1,0 +1,72 @@
+{
+   "class" : "batch",
+   "format" : "Algorithm::Classifier::IsolationForest::Prototype",
+   "params" : {
+      "contamination" : 0.01,
+      "extension_level" : 0,
+      "max_depth" : null,
+      "mode" : "axis",
+      "n_trees" : 100,
+      "sample_size" : 256,
+      "seed" : 42,
+      "voting" : "soft"
+   },
+   "schema" : {
+      "feature_descriptions" : {
+         "dhcp_type" : "encoded message type (discover/offer/request/ack/nak/decline/inform/release)",
+         "hostname_entropy" : "Shannon entropy of `dhcp.hostname` (randomized tooling names)",
+         "hostname_length" : "length of `dhcp.hostname`",
+         "lease_mismatch" : "boolean: requested lease time != offered lease time",
+         "mac_request_rate" : "DHCP messages per client MAC over the window (starvation / exhaustion)",
+         "new_mac" : "boolean: first time this client MAC is seen",
+         "requested_assigned_mismatch" : "boolean: `requested_ip` != `assigned_ip`",
+         "subnet_mac_count" : "distinct client MACs in this subnet over the window (spoofing floods)",
+         "subnet_server_count" : "distinct DHCP servers answering in this subnet over the window",
+         "vendor_class" : "frequency-encoded vendor class identifier (option 60)"
+      },
+      "feature_names" : [
+         "dhcp_type",
+         "mac_request_rate",
+         "new_mac",
+         "hostname_length",
+         "hostname_entropy",
+         "requested_assigned_mismatch",
+         "lease_mismatch",
+         "vendor_class",
+         "subnet_server_count",
+         "subnet_mac_count"
+      ],
+      "missing" : "nan",
+      "mungers" : {
+         "dhcp_type" : {
+            "default" : -1,
+            "map" : {
+               "ack" : 3,
+               "decline" : 5,
+               "discover" : 0,
+               "inform" : 6,
+               "nak" : 4,
+               "offer" : 1,
+               "release" : 7,
+               "request" : 2
+            },
+            "munger" : "enum"
+         },
+         "hostname_entropy" : {
+            "from" : "hostname",
+            "munger" : "entropy"
+         },
+         "hostname_length" : {
+            "from" : "hostname",
+            "munger" : "length"
+         },
+         "vendor_class" : {
+            "buckets" : 256,
+            "munger" : "hash"
+         }
+      }
+   },
+   "schema_description" : "(batch) Suricata DHCP set: message type, per-MAC/subnet rates and novelty, hostname and vendor features",
+   "schema_version" : "2026.07.09-1-batch",
+   "version" : 1
+}

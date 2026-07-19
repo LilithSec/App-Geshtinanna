@@ -1,0 +1,89 @@
+{
+   "class" : "batch",
+   "format" : "Algorithm::Classifier::IsolationForest::Prototype",
+   "params" : {
+      "contamination" : 0.01,
+      "extension_level" : 0,
+      "max_depth" : null,
+      "mode" : "axis",
+      "n_trees" : 100,
+      "sample_size" : 256,
+      "seed" : 42,
+      "voting" : "soft"
+   },
+   "schema" : {
+      "feature_descriptions" : {
+         "cert_validity_days" : "`notAfter` − `notBefore`, in days",
+         "days_until_expiry" : "days from observation to `notAfter` (≤0 = expired)",
+         "issuer_entropy" : "Shannon entropy of the certificate issuer string",
+         "ja3" : "frequency-encoded JA3 client fingerprint (rare = interesting)",
+         "ja3s" : "frequency-encoded JA3S server fingerprint",
+         "self_signed" : "boolean: issuer == subject",
+         "sni_absent" : "boolean: 1 when no SNI (raw-IP TLS / evasion)",
+         "sni_entropy" : "Shannon entropy of the SNI (randomized / DGA SNIs)",
+         "sni_length" : "length of the SNI, 0 when absent",
+         "subject_entropy" : "Shannon entropy of the certificate subject string",
+         "tls_version" : "encoded version (SSLv3 / 1.0 / 1.1 are anomalous)"
+      },
+      "feature_names" : [
+         "ja3",
+         "ja3s",
+         "tls_version",
+         "sni_length",
+         "sni_entropy",
+         "sni_absent",
+         "cert_validity_days",
+         "days_until_expiry",
+         "self_signed",
+         "subject_entropy",
+         "issuer_entropy"
+      ],
+      "missing" : "nan",
+      "mungers" : {
+         "issuer_entropy" : {
+            "from" : "issuer",
+            "munger" : "entropy"
+         },
+         "ja3" : {
+            "buckets" : 1024,
+            "munger" : "hash"
+         },
+         "ja3s" : {
+            "buckets" : 1024,
+            "munger" : "hash",
+            "seed" : 1
+         },
+         "sni_entropy" : {
+            "from" : "sni",
+            "munger" : "entropy"
+         },
+         "sni_length" : {
+            "from" : "sni",
+            "munger" : "length"
+         },
+         "subject_entropy" : {
+            "from" : "subject",
+            "munger" : "entropy"
+         },
+         "tls_version" : {
+            "default" : -1,
+            "map" : {
+               "SSLv2" : 0,
+               "SSLv3" : 1,
+               "TLS 1.0" : 2,
+               "TLS 1.1" : 3,
+               "TLS 1.2" : 4,
+               "TLS 1.3" : 5,
+               "TLSv1" : 2,
+               "TLSv1.1" : 3,
+               "TLSv1.2" : 4,
+               "TLSv1.3" : 5
+            },
+            "munger" : "enum"
+         }
+      }
+   },
+   "schema_description" : "(batch) Suricata TLS set: JA3/JA3S fingerprints, SNI shape, and certificate-hygiene features",
+   "schema_version" : "2026.07.09-1-batch",
+   "version" : 1
+}

@@ -1,0 +1,101 @@
+{
+   "class": "online",
+   "format": "Algorithm::Classifier::IsolationForest::Prototype",
+   "params": {
+      "contamination": 0.01,
+      "growth": "adaptive",
+      "max_leaf_samples": 32,
+      "n_trees": 100,
+      "seed": 42,
+      "window_size": 4096
+   },
+   "schema": {
+      "feature_descriptions": {
+         "app_proto": "encoded application proto (http/tls/dns/…)",
+         "bytes_to_packets": "avg packet size, `(bytes+1)/(packets+1)`",
+         "bytes_toclient": "raw byte count server→client",
+         "bytes_toserver": "raw byte count client→server",
+         "dest_port": "encoded: well-known vs. registered vs. ephemeral",
+         "duration": "seconds, derived from `flow.end` - `flow.start`",
+         "pkts_toclient": "raw packet count server→client",
+         "pkts_toserver": "raw packet count client→server",
+         "proto": "encoded transport proto (tcp/udp/icmp/…)",
+         "up_to_down": "upload/download ratio, `(bytes_toserver+1)/(bytes_toclient+1)`"
+      },
+      "feature_names": [
+         "pkts_toserver",
+         "pkts_toclient",
+         "bytes_toserver",
+         "bytes_toclient",
+         "duration",
+         "proto",
+         "app_proto",
+         "dest_port",
+         "bytes_to_packets",
+         "up_to_down"
+      ],
+      "missing": "zero",
+      "mungers": {
+         "app_proto": {
+            "default": -1,
+            "map": {
+               "bittorrent-dht": 23,
+               "dcerpc": 8,
+               "dhcp": 9,
+               "dnp3": 20,
+               "dns": 2,
+               "enip": 21,
+               "failed": 29,
+               "ftp": 6,
+               "ftp-data": 7,
+               "http": 0,
+               "http2": 25,
+               "ike": 16,
+               "imap": 26,
+               "krb5": 10,
+               "modbus": 19,
+               "mqtt": 11,
+               "nfs": 18,
+               "ntp": 28,
+               "pgsql": 24,
+               "quic": 12,
+               "rdp": 13,
+               "rfb": 17,
+               "sip": 14,
+               "smb": 5,
+               "smtp": 4,
+               "snmp": 15,
+               "ssh": 3,
+               "telnet": 27,
+               "tftp": 22,
+               "tls": 1,
+               "unknown": 30
+            },
+            "munger": "enum"
+         },
+         "dest_port": {
+            "bounds": [
+               1024,
+               49152
+            ],
+            "munger": "bucket"
+         },
+         "proto": {
+            "default": -1,
+            "map": {
+               "ESP": 6,
+               "GRE": 5,
+               "ICMP": 2,
+               "ICMPv6": 3,
+               "SCTP": 4,
+               "TCP": 0,
+               "UDP": 1
+            },
+            "munger": "enum"
+         }
+      }
+   },
+   "schema_description": "Suricata flow set: per-flow volume, shape, and timing features for anomaly detection",
+   "schema_version": "2026.07.09-1",
+   "version": 1
+}

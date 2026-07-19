@@ -1,0 +1,66 @@
+{
+   "class" : "batch",
+   "format" : "Algorithm::Classifier::IsolationForest::Prototype",
+   "params" : {
+      "contamination" : 0.01,
+      "extension_level" : 0,
+      "max_depth" : null,
+      "mode" : "axis",
+      "n_trees" : 100,
+      "sample_size" : 256,
+      "seed" : 42,
+      "voting" : "soft"
+   },
+   "schema" : {
+      "feature_descriptions" : {
+         "error_rate" : "TFTP error packets per source over the window (file-not-found scanning)",
+         "filename_entropy" : "Shannon entropy of the filename",
+         "filename_length" : "length of the requested filename",
+         "mode" : "encoded transfer mode (octet / netascii)",
+         "request_rate" : "TFTP requests per source over the window",
+         "tftp_opcode" : "encoded operation (RRQ read / WRQ write / ERROR)",
+         "write_flag" : "boolean: WRQ (upload to server)"
+      },
+      "feature_names" : [
+         "tftp_opcode",
+         "write_flag",
+         "mode",
+         "filename_length",
+         "filename_entropy",
+         "request_rate",
+         "error_rate"
+      ],
+      "missing" : "nan",
+      "mungers" : {
+         "filename_entropy" : {
+            "from" : "filename",
+            "munger" : "entropy"
+         },
+         "filename_length" : {
+            "from" : "filename",
+            "munger" : "length"
+         },
+         "mode" : {
+            "default" : -1,
+            "map" : {
+               "mail" : 2,
+               "netascii" : 1,
+               "octet" : 0
+            },
+            "munger" : "enum"
+         },
+         "tftp_opcode" : {
+            "default" : -1,
+            "map" : {
+               "error" : 2,
+               "read" : 0,
+               "write" : 1
+            },
+            "munger" : "enum"
+         }
+      }
+   },
+   "schema_description" : "(batch) Suricata TFTP set: opcode and write direction, mode, filename shape, request/error rates",
+   "schema_version" : "2026.07.09-1-batch",
+   "version" : 1
+}

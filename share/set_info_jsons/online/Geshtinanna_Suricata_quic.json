@@ -1,0 +1,65 @@
+{
+   "class": "online",
+   "format": "Algorithm::Classifier::IsolationForest::Prototype",
+   "params": {
+      "contamination": 0.01,
+      "growth": "adaptive",
+      "max_leaf_samples": 32,
+      "n_trees": 100,
+      "seed": 42,
+      "window_size": 4096
+   },
+   "schema": {
+      "feature_descriptions": {
+         "cyu": "frequency-encoded CYU (Chrome QUIC) fingerprint",
+         "dest_fanout": "distinct QUIC destinations per source over the window",
+         "duration": "connection duration from the paired flow, seconds",
+         "ja4": "frequency-encoded JA4/JA3 QUIC fingerprint (rare = interesting)",
+         "quic_tcp_ratio": "QUIC vs. TLS-over-TCP byte ratio per host over the window",
+         "quic_version": "encoded QUIC version (rare / forced-downgrade)",
+         "sni_absent": "boolean: 1 when no SNI (ECH / evasion)",
+         "sni_entropy": "Shannon entropy of the SNI",
+         "sni_length": "length of the SNI, 0 when absent",
+         "up_to_down": "upload/download byte ratio from the paired flow, `(toserver+1)/(toclient+1)`"
+      },
+      "feature_names": [
+         "quic_version",
+         "ja4",
+         "cyu",
+         "sni_length",
+         "sni_entropy",
+         "sni_absent",
+         "up_to_down",
+         "duration",
+         "dest_fanout",
+         "quic_tcp_ratio"
+      ],
+      "missing": "zero",
+      "mungers": {
+         "cyu": {
+            "buckets": 1024,
+            "munger": "hash",
+            "seed": 1
+         },
+         "ja4": {
+            "buckets": 1024,
+            "munger": "hash"
+         },
+         "quic_version": {
+            "buckets": 64,
+            "munger": "hash"
+         },
+         "sni_entropy": {
+            "from": "sni",
+            "munger": "entropy"
+         },
+         "sni_length": {
+            "from": "sni",
+            "munger": "length"
+         }
+      }
+   },
+   "schema_description": "Suricata QUIC set: handshake fingerprints and SNI plus flow-joined volume and timing features",
+   "schema_version": "2026.07.09-1",
+   "version": 1
+}

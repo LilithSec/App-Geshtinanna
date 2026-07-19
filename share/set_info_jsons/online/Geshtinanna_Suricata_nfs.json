@@ -1,0 +1,76 @@
+{
+   "class": "online",
+   "format": "Algorithm::Classifier::IsolationForest::Prototype",
+   "params": {
+      "contamination": 0.01,
+      "growth": "adaptive",
+      "max_leaf_samples": 32,
+      "n_trees": 100,
+      "seed": 42,
+      "window_size": 4096
+   },
+   "schema": {
+      "feature_descriptions": {
+         "auth_uid": "frequency-encoded RPC AUTH_SYS uid (unexpected uid = spoofed creds)",
+         "distinct_files": "distinct files accessed per host over the window",
+         "filename_entropy": "Shannon entropy of the filename",
+         "nfs_procedure": "encoded procedure (READ/WRITE/CREATE/REMOVE/RENAME/READDIR/…)",
+         "nfs_version": "encoded NFS version (v2 / v3 = weaker auth)",
+         "readdir_rate": "READDIR / READDIRPLUS per host over the window (directory enumeration)",
+         "status_fail": "boolean: response status is an error (permission probing)",
+         "write_delete_rate": "WRITE + REMOVE + RENAME ops per host over the window (ransomware / tampering)"
+      },
+      "feature_names": [
+         "nfs_procedure",
+         "nfs_version",
+         "status_fail",
+         "distinct_files",
+         "write_delete_rate",
+         "readdir_rate",
+         "filename_entropy",
+         "auth_uid"
+      ],
+      "missing": "zero",
+      "mungers": {
+         "auth_uid": {
+            "buckets": 256,
+            "munger": "hash"
+         },
+         "filename_entropy": {
+            "from": "filename",
+            "munger": "entropy"
+         },
+         "nfs_procedure": {
+            "default": -1,
+            "map": {
+               "ACCESS": 3,
+               "COMMIT": 20,
+               "CREATE": 7,
+               "FSINFO": 18,
+               "FSSTAT": 17,
+               "GETATTR": 0,
+               "LINK": 14,
+               "LOOKUP": 2,
+               "MKDIR": 8,
+               "MKNOD": 10,
+               "NULL": 21,
+               "PATHCONF": 19,
+               "READ": 5,
+               "READDIR": 15,
+               "READDIRPLUS": 16,
+               "READLINK": 4,
+               "REMOVE": 11,
+               "RENAME": 13,
+               "RMDIR": 12,
+               "SETATTR": 1,
+               "SYMLINK": 9,
+               "WRITE": 6
+            },
+            "munger": "enum"
+         }
+      }
+   },
+   "schema_description": "Suricata NFS set: procedure/version, file-op rates, filename entropy, asserted AUTH_SYS uid",
+   "schema_version": "2026.07.09-1",
+   "version": 1
+}

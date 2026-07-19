@@ -1,0 +1,58 @@
+{
+   "class" : "batch",
+   "format" : "Algorithm::Classifier::IsolationForest::Prototype",
+   "params" : {
+      "contamination" : 0.01,
+      "extension_level" : 0,
+      "max_depth" : null,
+      "mode" : "axis",
+      "n_trees" : 100,
+      "sample_size" : 256,
+      "seed" : 42,
+      "voting" : "soft"
+   },
+   "schema" : {
+      "feature_descriptions" : {
+         "announce_flag" : "boolean: announce_peer (this host is sharing content)",
+         "client_version" : "frequency-encoded client version string",
+         "distinct_info_hashes" : "distinct info_hashes queried / announced per source over the window",
+         "distinct_peers" : "distinct DHT peers contacted per source over the window (fanout)",
+         "node_id_entropy" : "Shannon entropy of the node id",
+         "request_rate" : "DHT messages per source over the window",
+         "request_type" : "encoded DHT query (ping / find_node / get_peers / announce_peer)"
+      },
+      "feature_names" : [
+         "request_type",
+         "request_rate",
+         "distinct_peers",
+         "distinct_info_hashes",
+         "announce_flag",
+         "client_version",
+         "node_id_entropy"
+      ],
+      "missing" : "nan",
+      "mungers" : {
+         "client_version" : {
+            "buckets" : 256,
+            "munger" : "hash"
+         },
+         "node_id_entropy" : {
+            "from" : "node_id",
+            "munger" : "entropy"
+         },
+         "request_type" : {
+            "default" : -1,
+            "map" : {
+               "announce_peer" : 3,
+               "find_node" : 1,
+               "get_peers" : 2,
+               "ping" : 0
+            },
+            "munger" : "enum"
+         }
+      }
+   },
+   "schema_description" : "(batch) Suricata BitTorrent DHT set: query type, peer/info-hash fanout, client and node-id features",
+   "schema_version" : "2026.07.09-1-batch",
+   "version" : 1
+}

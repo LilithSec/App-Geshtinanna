@@ -1,0 +1,55 @@
+{
+   "class": "online",
+   "format": "Algorithm::Classifier::IsolationForest::Prototype",
+   "params": {
+      "contamination": 0.01,
+      "growth": "adaptive",
+      "max_leaf_samples": 32,
+      "n_trees": 100,
+      "seed": 42,
+      "window_size": 4096
+   },
+   "schema": {
+      "feature_descriptions": {
+         "auth_fail_rate": "authentication failures per source over the window (password brute force)",
+         "conn_rate": "VNC connections per source over the window",
+         "desktop_name_entropy": "Shannon entropy of the server desktop name",
+         "rfb_version": "encoded protocol version (3.3 = weak-auth only)",
+         "screen_area": "framebuffer width × height, log-transformed (odd sizes = headless)",
+         "security_type": "encoded security type (None / VNC-auth / Tight / …)",
+         "shared_flag": "boolean: session requested shared (multiple viewers)"
+      },
+      "feature_names": [
+         "rfb_version",
+         "security_type",
+         "auth_fail_rate",
+         "conn_rate",
+         "shared_flag",
+         "desktop_name_entropy",
+         "screen_area"
+      ],
+      "missing": "zero",
+      "mungers": {
+         "desktop_name_entropy": {
+            "from": "desktop_name",
+            "munger": "entropy"
+         },
+         "rfb_version": {
+            "default": -1,
+            "map": {
+               "3.3": 0,
+               "3.7": 1,
+               "3.8": 2
+            },
+            "munger": "enum"
+         },
+         "screen_area": {
+            "munger": "log",
+            "offset": 1
+         }
+      }
+   },
+   "schema_description": "Suricata VNC/RFB set: protocol version, security type, brute-force rates, target profile",
+   "schema_version": "2026.07.09-1",
+   "version": 1
+}

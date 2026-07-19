@@ -1,0 +1,73 @@
+{
+   "class": "online",
+   "format": "Algorithm::Classifier::IsolationForest::Prototype",
+   "params": {
+      "contamination": 0.01,
+      "growth": "adaptive",
+      "max_leaf_samples": 32,
+      "n_trees": 100,
+      "seed": 42,
+      "window_size": 4096
+   },
+   "schema": {
+      "feature_descriptions": {
+         "answer_count": "number of answers returned",
+         "domain": "Shannon entropy of the queried domain (DGA detection)",
+         "domain_length": "length of the queried name",
+         "label_count": "number of labels (dots + 1) in the query",
+         "nxdomain_rate": "NXDOMAIN (rcode) rate per client over the window",
+         "rrtype": "encoded rrtype (TXT/NULL/ANY are rare and interesting)",
+         "ttl": "TTL of the response (very low TTL is suspicious)"
+      },
+      "feature_names": [
+         "domain",
+         "domain_length",
+         "label_count",
+         "rrtype",
+         "nxdomain_rate",
+         "ttl",
+         "answer_count"
+      ],
+      "missing": "zero",
+      "mungers": {
+         "domain": {
+            "munger": "entropy"
+         },
+         "domain_length": {
+            "from": "domain",
+            "munger": "length"
+         },
+         "label_count": {
+            "from": "domain",
+            "munger": "count",
+            "of": ".",
+            "plus": 1
+         },
+         "rrtype": {
+            "default": -1,
+            "map": {
+               "A": 0,
+               "AAAA": 1,
+               "ANY": 15,
+               "CNAME": 3,
+               "DNSKEY": 11,
+               "DS": 10,
+               "HTTPS": 4,
+               "MX": 5,
+               "NAPTR": 9,
+               "NS": 6,
+               "NULL": 14,
+               "PTR": 2,
+               "RRSIG": 12,
+               "SOA": 7,
+               "SRV": 8,
+               "TXT": 13
+            },
+            "munger": "enum"
+         }
+      }
+   },
+   "schema_description": "Suricata DNS per-event set (content only): domain entropy/length/labels, rrtype, NXDOMAIN rate, TTL, answer count",
+   "schema_version": "2026.07.09-1",
+   "version": 1
+}

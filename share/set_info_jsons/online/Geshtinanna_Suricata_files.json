@@ -1,0 +1,67 @@
+{
+   "class": "online",
+   "format": "Algorithm::Classifier::IsolationForest::Prototype",
+   "params": {
+      "contamination": 0.01,
+      "growth": "adaptive",
+      "max_leaf_samples": 32,
+      "n_trees": 100,
+      "seed": 42,
+      "window_size": 4096
+   },
+   "schema": {
+      "feature_descriptions": {
+         "direction": "boolean: 1 = inbound to the monitored net, 0 = outbound",
+         "double_extension": "boolean: two extensions (`invoice.pdf.exe`)",
+         "extension": "frequency-encoded file extension",
+         "file_size": "`fileinfo.size` in bytes, log-transformed",
+         "filename_entropy": "Shannon entropy of the filename",
+         "filename_length": "length of the filename",
+         "filename_non_ascii": "count of non-ASCII characters in the filename",
+         "hash_first_seen": "boolean: first time this file hash is seen in the environment",
+         "hash_prevalence": "frequency-encoded hash prevalence across the environment (rare = interesting)",
+         "magic_ext_mismatch": "boolean: `fileinfo.magic` type disagrees with the extension",
+         "truncated": "boolean: `state` != CLOSED or gaps present (incomplete transfer)"
+      },
+      "feature_names": [
+         "file_size",
+         "filename_length",
+         "filename_entropy",
+         "filename_non_ascii",
+         "extension",
+         "double_extension",
+         "magic_ext_mismatch",
+         "truncated",
+         "direction",
+         "hash_first_seen",
+         "hash_prevalence"
+      ],
+      "missing": "zero",
+      "mungers": {
+         "extension": {
+            "buckets": 256,
+            "munger": "hash"
+         },
+         "file_size": {
+            "munger": "log",
+            "offset": 1
+         },
+         "filename_entropy": {
+            "from": "filename",
+            "munger": "entropy"
+         },
+         "filename_length": {
+            "from": "filename",
+            "munger": "length"
+         },
+         "filename_non_ascii": {
+            "class": "non_ascii",
+            "from": "filename",
+            "munger": "char"
+         }
+      }
+   },
+   "schema_description": "Suricata fileinfo set: file size and name shape, extension, masquerade booleans, hash novelty",
+   "schema_version": "2026.07.09-1",
+   "version": 1
+}

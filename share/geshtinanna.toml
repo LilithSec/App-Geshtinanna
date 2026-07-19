@@ -1,0 +1,54 @@
+# Geshtinanna main configuration.
+#
+# Installed location: /usr/local/etc/geshtinanna.toml
+# (override with the GESHTINANNA_CONFIG env var, or `geshtinanna --config PATH`).
+#
+# This is a sample. Loaded by App::Geshtinanna::Config as plain decoded TOML;
+# each ingester reads the sub table it cares about.
+
+# Where Zorita keeps its data / online sockets / rendered models.
+[zorita]
+basedir = "/var/db/zorita/"
+
+# --- Suricata ingester -------------------------------------------------------
+#
+# App::Geshtinanna::Suricata tails each enabled flow's EVE JSON log and feeds
+# rows into Zorita under the `slug` below (one Zorita set per flow type).
+[suricata]
+slug = "suricata"
+
+# Each [suricata.flows.<set>] table configures one set. The table name is the
+# Zorita set (matching share/set_info_jsons/{online,batch}/Geshtinanna_Suricata_<set>.json).
+#
+#   enable = true|false   whether to tail this flow          (default: true)
+#   type   = "batch"|"online"  how its model is trained      (default: "batch")
+#   path   = "..."        the EVE log to FollowTail          (required)
+#
+# batch  -> rows appended to disk via the Zorita Writer, rebuilt on a schedule.
+# online -> rows streamed to the set's `zorita streamd` daemon over its socket;
+#           the daemon must already be running for that set.
+
+[suricata.flows.flow]
+enable = true
+type   = "online"
+path   = "/var/log/suricata/flows/current/flow.json"
+
+[suricata.flows.http]
+enable = true
+type   = "batch"
+path   = "/var/log/suricata/flows/current/http.json"
+
+[suricata.flows.dns]
+enable = true
+type   = "batch"
+path   = "/var/log/suricata/flows/current/dns.json"
+
+[suricata.flows.tls]
+enable = true
+type   = "batch"
+path   = "/var/log/suricata/flows/current/tls.json"
+
+[suricata.flows.ssh]
+enable = false
+type   = "batch"
+path   = "/var/log/suricata/flows/current/ssh.json"

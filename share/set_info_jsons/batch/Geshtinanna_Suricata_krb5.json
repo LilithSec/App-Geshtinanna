@@ -1,0 +1,72 @@
+{
+   "class" : "batch",
+   "format" : "Algorithm::Classifier::IsolationForest::Prototype",
+   "params" : {
+      "contamination" : 0.01,
+      "extension_level" : 0,
+      "max_depth" : null,
+      "mode" : "axis",
+      "n_trees" : 100,
+      "sample_size" : 256,
+      "seed" : 42,
+      "voting" : "soft"
+   },
+   "schema" : {
+      "feature_descriptions" : {
+         "cname_entropy" : "Shannon entropy of the client principal name",
+         "distinct_snames" : "distinct service names requested per principal over the window (SPN enumeration)",
+         "enc_type" : "encoded ticket encryption type (etype)",
+         "error_code" : "encoded error code (PREAUTH_FAILED, principal-unknown)",
+         "fail_rate" : "KRB-ERROR / failed requests per source over the window (spraying)",
+         "msg_type" : "encoded message type (AS-REQ/AS-REP/TGS-REQ/TGS-REP/ERROR)",
+         "sname_entropy" : "Shannon entropy of the service principal name",
+         "ticket_request_rate" : "TGS-REQ per principal over the window (kerberoasting)",
+         "weak_encryption" : "boolean: Suricata's `weak_encryption` flag (RC4/DES)"
+      },
+      "feature_names" : [
+         "msg_type",
+         "enc_type",
+         "weak_encryption",
+         "ticket_request_rate",
+         "distinct_snames",
+         "fail_rate",
+         "error_code",
+         "cname_entropy",
+         "sname_entropy"
+      ],
+      "missing" : "nan",
+      "mungers" : {
+         "cname_entropy" : {
+            "from" : "cname",
+            "munger" : "entropy"
+         },
+         "enc_type" : {
+            "buckets" : 64,
+            "munger" : "hash"
+         },
+         "error_code" : {
+            "buckets" : 64,
+            "munger" : "hash",
+            "seed" : 1
+         },
+         "msg_type" : {
+            "default" : -1,
+            "map" : {
+               "KRB_AS_REP" : 1,
+               "KRB_AS_REQ" : 0,
+               "KRB_ERROR" : 4,
+               "KRB_TGS_REP" : 3,
+               "KRB_TGS_REQ" : 2
+            },
+            "munger" : "enum"
+         },
+         "sname_entropy" : {
+            "from" : "sname",
+            "munger" : "entropy"
+         }
+      }
+   },
+   "schema_description" : "(batch) Suricata Kerberos set: message/enc types, kerberoasting and spraying rates, principal-name entropy",
+   "schema_version" : "2026.07.09-1-batch",
+   "version" : 1
+}

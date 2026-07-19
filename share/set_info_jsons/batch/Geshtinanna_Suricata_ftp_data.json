@@ -1,0 +1,58 @@
+{
+   "class" : "batch",
+   "format" : "Algorithm::Classifier::IsolationForest::Prototype",
+   "params" : {
+      "contamination" : 0.01,
+      "extension_level" : 0,
+      "max_depth" : null,
+      "mode" : "axis",
+      "n_trees" : 100,
+      "sample_size" : 256,
+      "seed" : 42,
+      "voting" : "soft"
+   },
+   "schema" : {
+      "feature_descriptions" : {
+         "direction" : "boolean: 1 = inbound STOR to server, 0 = outbound RETR",
+         "filename_entropy" : "Shannon entropy of the filename",
+         "filename_length" : "length of the transferred filename",
+         "files_per_session_rate" : "files transferred per host over the window",
+         "transfer_bytes" : "bytes moved on the data channel, log-transformed (paired flow)",
+         "transfer_command" : "encoded STOR (upload) vs. RETR (download)"
+      },
+      "feature_names" : [
+         "transfer_command",
+         "transfer_bytes",
+         "direction",
+         "filename_length",
+         "filename_entropy",
+         "files_per_session_rate"
+      ],
+      "missing" : "nan",
+      "mungers" : {
+         "filename_entropy" : {
+            "from" : "filename",
+            "munger" : "entropy"
+         },
+         "filename_length" : {
+            "from" : "filename",
+            "munger" : "length"
+         },
+         "transfer_bytes" : {
+            "munger" : "log",
+            "offset" : 1
+         },
+         "transfer_command" : {
+            "default" : -1,
+            "map" : {
+               "RETR" : 0,
+               "STOR" : 1
+            },
+            "munger" : "enum"
+         }
+      }
+   },
+   "schema_description" : "(batch) Suricata FTP data set: transfer direction and verb, flow-joined bytes, filename shape",
+   "schema_version" : "2026.07.09-1-batch",
+   "version" : 1
+}

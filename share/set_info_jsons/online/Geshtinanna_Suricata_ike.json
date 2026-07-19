@@ -1,0 +1,54 @@
+{
+   "class": "online",
+   "format": "Algorithm::Classifier::IsolationForest::Prototype",
+   "params": {
+      "contamination": 0.01,
+      "growth": "adaptive",
+      "max_leaf_samples": 32,
+      "n_trees": 100,
+      "seed": 42,
+      "window_size": 4096
+   },
+   "schema": {
+      "feature_descriptions": {
+         "auth_method": "encoded authentication method (PSK vs. certificate)",
+         "dh_group": "encoded Diffie-Hellman group (low groups = weak / downgrade)",
+         "enc_alg": "encoded proposed encryption algorithm (DES / 3DES = weak)",
+         "exchange_type": "encoded exchange (main / aggressive / IKE_SA_INIT / …)",
+         "ike_version": "encoded IKE version (v1 vs v2)",
+         "init_rate": "SA-init / main-mode starts per source over the window (brute force / DoS)",
+         "notify_fail_rate": "error / notify (AUTHENTICATION_FAILED, NO_PROPOSAL_CHOSEN) per source over the window",
+         "vendor_id": "frequency-encoded vendor ID (fingerprints the VPN implementation)",
+         "weak_proposal": "boolean: any proposed algorithm is weak / deprecated"
+      },
+      "feature_names": [
+         "ike_version",
+         "exchange_type",
+         "enc_alg",
+         "dh_group",
+         "auth_method",
+         "weak_proposal",
+         "init_rate",
+         "vendor_id",
+         "notify_fail_rate"
+      ],
+      "missing": "zero",
+      "mungers": {
+         "auth_method": {
+            "buckets": 32,
+            "munger": "hash"
+         },
+         "enc_alg": {
+            "buckets": 64,
+            "munger": "hash"
+         },
+         "vendor_id": {
+            "buckets": 256,
+            "munger": "hash"
+         }
+      }
+   },
+   "schema_description": "Suricata IKE/ISAKMP set: version, exchange type, proposed crypto, negotiation rates, vendor ID",
+   "schema_version": "2026.07.09-1",
+   "version": 1
+}

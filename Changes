@@ -1,0 +1,14 @@
+Revision history for App-Geshtinanna
+
+0.0.1   (unreleased)
+        - Initial sketch of the Suricata ingest pipeline.
+        - App::Geshtinanna::Config: load /usr/local/etc/geshtinanna.toml.
+        - App::Geshtinanna::Suricata: POE + POE::Wheel::FollowTail engine that
+          tails Suricata EVE flow logs and feeds each event into a Zorita set
+          (batch Writer or online streaming Client), with flow/http/dns/tls
+          extractors.
+        - App::Geshtinanna::SetInfo: install shipped set prototypes as Zorita
+          sets (prototype -> info.json bridge).
+        - App::Geshtinanna::CLI / geshtinanna: App::Cmd front end.
+        - share/set_info_jsons split into online/ and batch/ prototypes;
+          maint/online2batch.pl derives the batch twins from the online ones.

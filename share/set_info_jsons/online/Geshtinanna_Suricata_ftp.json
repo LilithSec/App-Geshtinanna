@@ -1,0 +1,73 @@
+{
+   "class": "online",
+   "format": "Algorithm::Classifier::IsolationForest::Prototype",
+   "params": {
+      "contamination": 0.01,
+      "growth": "adaptive",
+      "max_leaf_samples": 32,
+      "n_trees": 100,
+      "seed": 42,
+      "window_size": 4096
+   },
+   "schema": {
+      "feature_descriptions": {
+         "command_rate": "commands per source over the window",
+         "distinct_commands": "distinct commands per session (recon)",
+         "ftp_command": "encoded command (USER/PASS/RETR/STOR/LIST/DELE/SITE/…)",
+         "login_fail_rate": "authentication-failed (530) replies per source over the window",
+         "passive_mode": "boolean: PASV/EPSV used (dynamic data port negotiated)",
+         "reply_code": "bucketed completion code (2xx / 4xx / 5xx)",
+         "username_entropy": "Shannon entropy of the USER argument"
+      },
+      "feature_names": [
+         "ftp_command",
+         "reply_code",
+         "login_fail_rate",
+         "command_rate",
+         "distinct_commands",
+         "username_entropy",
+         "passive_mode"
+      ],
+      "missing": "zero",
+      "mungers": {
+         "ftp_command": {
+            "default": -1,
+            "map": {
+               "APPE": 19,
+               "AUTH": 21,
+               "CWD": 8,
+               "DELE": 6,
+               "EPSV": 13,
+               "FEAT": 20,
+               "LIST": 4,
+               "MKD": 15,
+               "NLST": 5,
+               "PASS": 1,
+               "PASV": 12,
+               "PORT": 11,
+               "PWD": 9,
+               "QUIT": 14,
+               "RETR": 2,
+               "RMD": 16,
+               "RNFR": 17,
+               "RNTO": 18,
+               "SITE": 7,
+               "STOR": 3,
+               "TYPE": 10,
+               "USER": 0
+            },
+            "munger": "enum"
+         },
+         "reply_code": {
+            "munger": "ftp_enum"
+         },
+         "username_entropy": {
+            "from": "username",
+            "munger": "entropy"
+         }
+      }
+   },
+   "schema_description": "Suricata FTP control set: command, reply code, auth-failure and command rates, username entropy",
+   "schema_version": "2026.07.09-1",
+   "version": 1
+}

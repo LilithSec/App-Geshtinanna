@@ -1,0 +1,42 @@
+{
+   "class": "online",
+   "format": "Algorithm::Classifier::IsolationForest::Prototype",
+   "params": {
+      "contamination": 0.01,
+      "growth": "adaptive",
+      "max_leaf_samples": 32,
+      "n_trees": 100,
+      "seed": 42,
+      "window_size": 4096
+   },
+   "schema": {
+      "feature_descriptions": {
+         "bind_rate": "interface bind attempts per source over the window (interface scanning)",
+         "distinct_interfaces": "distinct interfaces bound per host over the window",
+         "distinct_opnums": "distinct operations per host over the window (recon / lateral)",
+         "fault_rate": "fault / error responses per source over the window (access-denied probing)",
+         "interface_uuid": "frequency-encoded interface UUID (drsuapi / svcctl / atsvc / samr = tooling)",
+         "opnum": "encoded operation number within the interface",
+         "request_rate": "DCERPC requests per source over the window"
+      },
+      "feature_names": [
+         "interface_uuid",
+         "opnum",
+         "distinct_opnums",
+         "distinct_interfaces",
+         "request_rate",
+         "bind_rate",
+         "fault_rate"
+      ],
+      "missing": "zero",
+      "mungers": {
+         "interface_uuid": {
+            "buckets": 1024,
+            "munger": "hash"
+         }
+      }
+   },
+   "schema_description": "Suricata DCERPC set: interface UUID and opnum plus per-host recon and lateral-movement rates",
+   "schema_version": "2026.07.09-1",
+   "version": 1
+}

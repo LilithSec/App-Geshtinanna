@@ -1,20 +1,29 @@
 # App-Geshtinanna
 
-Ingests data from Suricata/LibreNMS for into Zorita for building Isolation Forest
-models.
+Ingests data from Suricata/LibreNMS into online Isolation Forest models for
+anomaly detection.
 
 ## How the pieces fit together
 
-- **[Algorithm::Classifier::IsolationForest::Zorita]** owns the on-disk layout
-  and the training/roll-up utilities. Data lives at
-  `$basedir/$slug/$set/$date/$hour/` (default basedir `/var/db/zorita/`).
-  - A `slug` is a top-level namespace. Everything here lives under the slug
-    `suricata`.
-  - A `set` is one feature table === one Isolation Forest model. Each set
-    declares an ordered list of columns (its `tags`) plus the hyper-parameters
-    handed to the forest (`n_trees`, `sample_size`, `contamination`, `missing`,
-    …). Column order is significant and is honored by the Writer, so the tables
-    below are written in the order the columns should be emitted.
+- **[Algorithm::Classifier::IsolationForest::Online]** is the streaming
+  Isolation Forest each set trains. There is no batch `fit()`: events are
+  `learn`ed as they arrive and, once the stream exceeds the model's
+  `window_size`, the oldest retained event is forgotten for each new one, so
+  the model always reflects the most recent window of the stream.
+  - A `slug` is a top-level namespace grouping related sets; everything here
+    lives under the slug `suricata` (sensor telemetry goes under its own
+    `sensor` slug).
+  - A `set` is one feature table === one online Isolation Forest model. Each
+    set declares an ordered list of columns (its `feature_names`) plus the
+    hyper-parameters handed to the forest (`n_trees`, `window_size`,
+    `max_leaf_samples`, `contamination`, `missing`, …). Column order is
+    significant and is honored by the writer, so the tables below are written
+    in the order the columns should be emitted.
+  - Each set ships as an **online prototype** JSON under
+    `share/set_info_jsons/` (`Geshtinanna_Suricata_<set>.json`); load one with
+    `Algorithm::Classifier::IsolationForest->load_prototype($file)` to get a
+    fresh, unfitted model with that schema and knobs already stamped in. See
+    that directory's README for the file format and conventions.
 - `Algorithm::Time::ToNumber` converts a Suricata `.timestamp` into a
   cyclic sin/cos pair. Use `suricata_to_circle_both` for the desired time field:
   it encodes day-of-week and time-of-day as a single position on a
@@ -42,13 +51,20 @@ These apply to every set below; the per-set notes only call out exceptions.
   its own axis.
 - **Log-transform heavy tails.** Bytes, durations, and counts are extremely
   skewed; a forest splits them poorly raw. Anything marked "log" below is
-  `log1p`-transformed before storage.
+  `log`-transformed (`log(v+1)`) before it is learned.
 - **One event type per set.** Feature spaces differ too much between DNS and
   TLS to share a model — a combined model just dilutes signal. Hence a set (and
   a forest) per event type, and sometimes more than one per event type.
 - **Two altitudes.** Per-event sets catch loud single events; a planned
   host-level set aggregated per `(src_ip, window)` catches slow / distributed
   behavior that no single event reveals. See [Host-level model](#host-level-model-planned).
+- **Missing cells learn as zero.** The online model's `missing` policy is only
+  `die` or `zero` (it has no batch `nan` / `impute`), so every set uses `zero`:
+  an absent cell is learned as `0.0`. Where a real `0` would be misleading —
+  the sparse cert / fingerprint / extended-logging columns the per-set caveats
+  call out — prefer a munger sentinel (an `enum` `default: -1`) over leaning on
+  the missing policy. The caveats below say "ride `missing => zero`" for the
+  columns where a zero is harmless enough.
 
 ## LibreNMS
 
@@ -302,9 +318,13 @@ legitimate internal services are self-signed — so the forest keys on them
 *co-occurring*, which is what a throwaway cert actually looks like.
 
 > **Missing-cert caveat:** resumed sessions and handshakes where Suricata never
-> logs a certificate leave all five cert columns empty. Lean on the set's
-> `missing => nan` policy rather than defaulting them to 0, which would fake a
-> "zero-day validity, self-signed" cert on every resumption.
+> logs a certificate leave all five cert columns empty. Under the online
+> `missing => zero` policy an empty cell learns as `0`, which fakes a "zero-day
+> validity, self-signed" cert on every resumption — so give these columns
+> munger sentinels the forest can tell apart from a real cert (e.g. a negative
+> `cert_validity_days` / `days_until_expiry` fill and `self_signed` left
+> unset-as-0 only where 0 genuinely means "not self-signed") rather than
+> relying on the missing policy to stay neutral.
 
 **Candidates to add:** JA4/JA4S (newer, GREASE-robust fingerprints — same
 frequency-encoding), SAN count, certificate-chain length, and a
@@ -355,9 +375,11 @@ credential-attack signature, so `conn_rate` (per source, via
 `Algorithm::EventsPerSecond`) is the axis that captures it.
 
 > **HASSH-disabled caveat:** HASSH requires `hassh: enabled` in `suricata.yaml`.
-> With it off, `hassh` / `hassh_server` are always empty — ride the set's
-> `missing => nan` policy and the model degrades to banner + rate features
-> rather than treating an unset fingerprint as a real value.
+> With it off, `hassh` / `hassh_server` are always empty. Under `missing =>
+> zero` they collapse to a single constant (0) the whole time, so the model
+> effectively degrades to banner + rate features — acceptable while these
+> columns are placeholder `hash` mungers, but decide the empty-fingerprint fill
+> deliberately once they move to `frozen_freq_map`.
 
 **Candidates to add:** client `software_version` length/entropy (randomized
 banners), distinct servers contacted per source (spread / scanning), and
@@ -424,7 +446,7 @@ baseline. A rare-or-brand-new binary is exactly the file worth a second look.
 > environment (the same way the rate columns require `Algorithm::EventsPerSecond`
 > state). And both depend on file hashing being enabled in `suricata.yaml`
 > (`filestore` / md5 / sha256); with hashing off they are always empty and
-> should ride the set's `missing => nan` policy.
+> should ride the set's `missing => zero` policy.
 
 **Candidates to add:** `app_proto` encoded (which protocol carried the file),
 files-per-host-per-window, same-hash-to-many-destinations (staging / exfil), and
@@ -486,7 +508,7 @@ misbehaving DHCP client rather than a normal OS stack.
 > `Algorithm::EventsPerSecond`, "seen" sets for the rest). And `hostname`,
 > `requested_ip`, lease time, and vendor class only appear when DHCP extended
 > logging is on (`dhcp: extended: yes` in `suricata.yaml`); without it those
-> columns are empty and ride the set's `missing => nan` policy.
+> columns are empty and ride the set's `missing => zero` policy.
 
 > **Rule-vs-model note:** the crispest DHCP wins — a new server IP answering a
 > subnet, a rogue server — are better handled as a simple alerting rule than
@@ -555,7 +577,7 @@ integration, and either is worth surfacing.
 > **Sparse-by-packet-type caveat:** each control packet populates only its own
 > columns — topic fields exist only on PUBLISH/SUBSCRIBE, `client_id` only on
 > CONNECT — so any single event leaves the rest empty. `mqtt_type` says which
-> columns are meaningful for a row; the others ride `missing => nan`. As with
+> columns are meaningful for a row; the others ride `missing => zero`. As with
 > the other sets, `msg_rate` / `distinct_topics` / `new_client_id` /
 > `connack_fails` come from per-client pipeline state, not one record.
 
@@ -611,7 +633,7 @@ is a deliberate evasion tell.
 > **Flow-join caveat:** `up_to_down`, `duration`, and the ratio/fanout columns
 > are not in the `quic` event — the pipeline must correlate to the paired `flow`
 > record (and hold per-source/per-host state) to build them. Rows where the flow
-> record isn't yet available ride `missing => nan`.
+> record isn't yet available ride `missing => zero`.
 
 **Candidates to add:** the highest-value QUIC adds are beacon features —
 inter-arrival-time variance and byte-size consistency across connections to the
@@ -666,7 +688,7 @@ envelope so the two don't duplicate each other.
 
 > **Extraction + handoff caveat:** header fields (`From`, subject, URLs) require
 > Suricata's MIME / email extraction enabled in `suricata.yaml`; without it those
-> columns are empty and ride `missing => nan`. Attachment *content* is not here —
+> columns are empty and ride `missing => zero`. Attachment *content* is not here —
 > correlate to the `files` set on `flow_id`. `distinct_rcpt_rate` is per-sender
 > pipeline state.
 
@@ -912,7 +934,7 @@ default self-signed RDP certificate, which is normal but, combined with an
 external source and a rare client build, adds weight.
 
 > **TLS-handoff caveat:** NLA / CredSSP moves auth into TLS, so the `cookie`
-> columns are often absent (ride `missing => nan`) and the real cert / JA3
+> columns are often absent (ride `missing => zero`) and the real cert / JA3
 > fingerprint lives in the paired `tls` event — score it there, don't duplicate.
 > `conn_rate` is per-source pipeline state.
 
@@ -962,7 +984,7 @@ that rises during both enumeration and malformed-request probing.
 
 > **Request/response split + rule caveat:** `response_code` / `auth_fail_rate`
 > come from responses, `sip_method` / URI fields from requests, so a single event
-> populates a subset — the rest ride `missing => nan`. The rate/distinct columns
+> populates a subset — the rest ride `missing => zero`. The rate/distinct columns
 > are per-source window state. Known scanner UAs (`friendly-scanner`) are also
 > trivially a rule.
 
@@ -1014,7 +1036,7 @@ authentication-failure probing.
 > `community_present` and `community_entropy`, never the raw string (same rule as
 > hashes). `request_rate`, `set_rate`, `distinct_oids`, and `error_rate` are
 > per-source window state. SNMPv3 moves auth into USM, so the community columns
-> are empty there and ride `missing => nan`.
+> are empty there and ride `missing => zero`.
 
 **Candidates to add:** USM username frequency-encoded (v3), and OID-prefix
 frequency-encoding (which MIB subtree is being hit).
@@ -1576,7 +1598,7 @@ compromised, scanning, or misconfigured.
 > **No double-count + IDS caveat:** pick one source for the "blocked" signal —
 > `drop_count` here *or* `blocked_count` from `alert.action`, not both. In IDS
 > (non-inline) mode there are no `drop` events at all, so this column is simply
-> absent and rides `missing => nan`.
+> absent and rides `missing => zero`.
 
 ## stats — sensor-health model & data-quality guard
 
@@ -1636,8 +1658,10 @@ benefit from entity-level aggregation (per device / MAC) at this altitude.
 
 ## Open questions / TODO
 
-- Confirm the exact `n_trees` / `sample_size` / `contamination` per set; the
-  defaults in the Zorita synopsis (100 / 256 / 0.01) are a starting point.
+- Confirm the exact `n_trees` / `window_size` / `max_leaf_samples` /
+  `contamination` per set; the prototype defaults (100 / 4096 / 32 / 0.01) are a
+  starting point, and `window_size` especially wants tuning against each set's
+  real event volume.
 - Decide the rate-window length for `rcode`, `src_request_rate`, and the ssh /
   dhcp / mqtt volume columns.
 - Cyclic time is included in `dns_with_time` on the expectation that it earns
@@ -1645,6 +1669,6 @@ benefit from entity-level aggregation (per device / MAC) at this altitude.
   per-event sets.
 - fill out LibreNMS bits
 
-[Algorithm::Classifier::IsolationForest::Zorita]: https://metacpan.org/pod/Algorithm::Classifier::IsolationForest::Zorita
+[Algorithm::Classifier::IsolationForest::Online]: https://metacpan.org/pod/Algorithm::Classifier::IsolationForest::Online
 [Algorithm::Time::ToNumber]: https://metacpan.org/pod/Algorithm::Time::ToNumber
 [Algorithm::EventsPerSecond]: https://metacpan.org/pod/Algorithm::EventsPerSecond

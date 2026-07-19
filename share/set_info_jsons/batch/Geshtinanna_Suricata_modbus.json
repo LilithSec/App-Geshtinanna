@@ -1,0 +1,46 @@
+{
+   "class" : "batch",
+   "format" : "Algorithm::Classifier::IsolationForest::Prototype",
+   "params" : {
+      "contamination" : 0.01,
+      "extension_level" : 0,
+      "max_depth" : null,
+      "mode" : "axis",
+      "n_trees" : 100,
+      "sample_size" : 256,
+      "seed" : 42,
+      "voting" : "soft"
+   },
+   "schema" : {
+      "feature_descriptions" : {
+         "command_rate" : "requests per master over the window (baseline vs. flood)",
+         "exception_rate" : "exception responses per master over the window (illegal-function probing)",
+         "function_code" : "encoded function (read/write coils / registers, diagnostics)",
+         "new_master" : "boolean: first time this source addresses this slave",
+         "quantity" : "number of registers / coils touched (bulk write)",
+         "register_address" : "target register / coil address (writes to control ranges)",
+         "unit_id" : "frequency-encoded unit / slave id (unexpected target device)",
+         "write_flag" : "boolean: a write function (write single/multiple coil/register)"
+      },
+      "feature_names" : [
+         "function_code",
+         "write_flag",
+         "command_rate",
+         "unit_id",
+         "register_address",
+         "quantity",
+         "exception_rate",
+         "new_master"
+      ],
+      "missing" : "nan",
+      "mungers" : {
+         "unit_id" : {
+            "buckets" : 256,
+            "munger" : "hash"
+         }
+      }
+   },
+   "schema_description" : "(batch) Suricata Modbus ICS set: function code, write/address/quantity tampering, behavioral rates",
+   "schema_version" : "2026.07.09-1-batch",
+   "version" : 1
+}

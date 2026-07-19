@@ -1,0 +1,65 @@
+{
+   "class": "online",
+   "format": "Algorithm::Classifier::IsolationForest::Prototype",
+   "params": {
+      "contamination": 0.01,
+      "growth": "adaptive",
+      "max_leaf_samples": 32,
+      "n_trees": 100,
+      "seed": 42,
+      "window_size": 4096
+   },
+   "schema": {
+      "feature_descriptions": {
+         "client_software": "frequency-encoded client `software_version` banner",
+         "conn_rate": "SSH connections per source IP over the window (brute-force = volume)",
+         "hassh": "frequency-encoded client HASSH fingerprint (rare = interesting)",
+         "hassh_server": "frequency-encoded server HASSH fingerprint",
+         "proto_version": "encoded protocol version (2.0 normal; 1.x is anomalous)",
+         "server_software": "frequency-encoded server `software_version` banner"
+      },
+      "feature_names": [
+         "hassh",
+         "hassh_server",
+         "client_software",
+         "server_software",
+         "proto_version",
+         "conn_rate"
+      ],
+      "missing": "zero",
+      "mungers": {
+         "client_software": {
+            "buckets": 1024,
+            "munger": "hash",
+            "seed": 2
+         },
+         "hassh": {
+            "buckets": 1024,
+            "munger": "hash"
+         },
+         "hassh_server": {
+            "buckets": 1024,
+            "munger": "hash",
+            "seed": 1
+         },
+         "proto_version": {
+            "default": -1,
+            "map": {
+               "1.3": 3,
+               "1.5": 2,
+               "1.99": 1,
+               "2.0": 0
+            },
+            "munger": "enum"
+         },
+         "server_software": {
+            "buckets": 1024,
+            "munger": "hash",
+            "seed": 3
+         }
+      }
+   },
+   "schema_description": "Suricata SSH set: HASSH fingerprints, software banners, protocol version, connection rate",
+   "schema_version": "2026.07.09-1",
+   "version": 1
+}
