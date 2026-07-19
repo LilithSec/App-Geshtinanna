@@ -7,7 +7,6 @@ use App::Geshtinanna::CLI -command;
 use App::Geshtinanna::Config;
 use App::Geshtinanna::Suricata;
 use App::Geshtinanna::SetInfo;
-use File::Spec;
 
 our $VERSION = '0.0.1';
 
@@ -74,30 +73,11 @@ sub execute {
     return;
 }
 
-# Locate the installed set_info_jsons share dir, falling back to the in-repo
-# copy so the command works from a git checkout without installing.
+# Locate the installed set_info_jsons share dir (falls back to the in-repo copy
+# so the command works from a git checkout without installing).
 sub _share_dir {
     my ( $self, $override ) = @_;
-    return $override if $override;
-
-    my $installed = eval {
-        require File::ShareDir;
-        File::Spec->catdir(
-            File::ShareDir::dist_dir('App-Geshtinanna'), 'set_info_jsons' );
-    };
-    return $installed if $installed && -d $installed;
-
-    # dev fallback: walk up from this file (.../lib/App/Geshtinanna/CLI/Command/
-    # suricata.pm) five dirs to the repo root and use its in-tree share/.
-    require Cwd;
-    require File::Basename;
-    my @dirs = File::Spec->splitdir(
-        File::Basename::dirname( Cwd::abs_path(__FILE__) ) );
-    splice @dirs, -5;   # drop Command, CLI, Geshtinanna, App, lib
-    my $repo = File::Spec->catdir( @dirs, 'share', 'set_info_jsons' );
-    return $repo if -d $repo;
-
-    die "could not locate the set_info_jsons share dir (pass --share)\n";
+    return App::Geshtinanna::SetInfo->share_dir($override);
 }
 
 =head1 AUTHOR

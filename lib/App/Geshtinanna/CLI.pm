@@ -20,7 +20,8 @@ our $VERSION = '0.0.1';
 =head1 DESCRIPTION
 
 The L<App::Cmd> application behind the C<geshtinanna> binary. Commands live
-under C<App::Geshtinanna::CLI::Command::> (currently just C<suricata>).
+under C<App::Geshtinanna::CLI::Command::>: C<suricata> (follow EVE logs into
+Zorita) and C<config> (print a default configuration).
 
 =head1 AUTHOR
 

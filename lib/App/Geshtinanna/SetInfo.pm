@@ -82,6 +82,66 @@ sub prototype_to_info {
     return \%info;
 }
 
+=head2 share_dir
+
+    my $dir = App::Geshtinanna::SetInfo->share_dir;         # locate it
+    my $dir = App::Geshtinanna::SetInfo->share_dir($override);   # or force one
+
+Locate the F<set_info_jsons> share directory. Returns C<$override> when given;
+otherwise the installed dist share dir (via L<File::ShareDir>), falling back to
+the in-repo F<share/set_info_jsons> so the tools work from a git checkout.
+Croaks if none can be found.
+
+=cut
+
+sub share_dir {
+    my ( $class, $override ) = @_;
+    return $override if defined $override && length $override;
+
+    my $installed = eval {
+        require File::ShareDir;
+        File::Spec->catdir(
+            File::ShareDir::dist_dir('App-Geshtinanna'), 'set_info_jsons' );
+    };
+    return $installed if $installed && -d $installed;
+
+    # dev fallback: this file is .../lib/App/Geshtinanna/SetInfo.pm; walk up to
+    # the repo root and use its in-tree share/.
+    require Cwd;
+    require File::Basename;
+    my @dirs = File::Spec->splitdir(
+        File::Basename::dirname( Cwd::abs_path(__FILE__) ) );
+    splice @dirs, -3;   # drop Geshtinanna, App, lib
+    my $repo = File::Spec->catdir( @dirs, 'share', 'set_info_jsons' );
+    return $repo if -d $repo;
+
+    croak "could not locate the set_info_jsons share dir (pass --share)";
+}
+
+=head2 list_sets
+
+    my @sets = App::Geshtinanna::SetInfo->list_sets( $share, $type );
+
+The sorted set names shipped for C<$type> (C<online> or C<batch>, default
+C<batch>): every F<Geshtinanna_Suricata_$set.json> prototype under
+C<$share/$type>. Croaks if that directory cannot be read.
+
+=cut
+
+sub list_sets {
+    my ( $class, $share, $type ) = @_;
+    $type //= 'batch';
+    my $dir = File::Spec->catdir( $share, $type );
+    opendir my $dh, $dir or croak "SetInfo: cannot read $dir: $!";
+    my %set;
+    while ( defined( my $entry = readdir $dh ) ) {
+        $set{$1} = 1 if $entry =~ /\AGeshtinanna_Suricata_(.+)\.json\z/;
+    }
+    closedir $dh;
+    my @sets = sort keys %set;
+    return @sets;
+}
+
 =head2 prototype_path
 
     my $path = App::Geshtinanna::SetInfo->prototype_path($share, $type, $set);

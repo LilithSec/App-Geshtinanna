@@ -89,6 +89,23 @@ my %EVENT_TYPE = (
 
 =head1 METHODS
 
+=head2 implemented_flows
+
+    my @sets = App::Geshtinanna::Suricata->implemented_flows;
+
+Class method: the sorted list of flow/set names that have an extractor here (and
+so can actually be fed into Zorita). Any other configured flow is tailed but its
+events are skipped with a one-time warning. Used by C<geshtinanna config> to
+decide which flows to enable by default.
+
+=cut
+
+sub implemented_flows {
+    my ($class) = @_;
+    my @flows = sort keys %EXTRACTORS;
+    return @flows;
+}
+
 =head2 new
 
     my $engine = App::Geshtinanna::Suricata->new(

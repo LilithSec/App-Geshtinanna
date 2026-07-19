@@ -16,6 +16,7 @@ geshtinanna - Ingest Suricata/LibreNMS telemetry into online Isolation Forest mo
 
 =head1 SYNOPSIS
 
+    geshtinanna config > /usr/local/etc/geshtinanna.toml  # write a default config
     geshtinanna suricata --help
     geshtinanna suricata --setup            # install Zorita sets, then follow
     geshtinanna suricata                    # follow enabled EVE flows into Zorita
