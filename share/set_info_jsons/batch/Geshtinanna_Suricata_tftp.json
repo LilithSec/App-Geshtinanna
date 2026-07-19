@@ -9,7 +9,7 @@
       "n_trees" : 100,
       "sample_size" : 256,
       "seed" : 42,
-      "voting" : "soft"
+      "voting" : "mean"
    },
    "schema" : {
       "feature_descriptions" : {
