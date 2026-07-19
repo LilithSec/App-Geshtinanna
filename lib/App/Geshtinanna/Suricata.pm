@@ -115,7 +115,8 @@ my %EXTRACTORS = (
 # a sanity filter against a mislabelled line (hyphen/underscore differences are
 # normalized away in _poe_flow_line, so only genuine remappings belong here).
 my %EVENT_TYPE = (
-    dns_with_time => 'dns',   # a second, time-aware view of the dns EVE log
+    dns_with_time => 'dns',        # a second, time-aware view of the dns EVE log
+    files         => 'fileinfo',   # the 'files' set is fed by EVE 'fileinfo' events
 );
 
 =head1 METHODS
@@ -423,14 +424,23 @@ sub _extract_http {
     my ( $self, $rec ) = @_;
     my $h = $rec->{http} or return;
 
+    # HTTP/2 control frames (SETTINGS, WINDOW_UPDATE, ...) are logged as http
+    # events carrying only an `http2` frame block and no request line. There is
+    # no method / URL / User-Agent to score against the request-shape model, so
+    # skip them; a real request (h1 or h2) always has at least a method or URL.
+    my $method = $h->{http_method};
+    my $url    = $h->{url};
+    return unless ( defined $method && length $method )
+               || ( defined $url && length $url );
+
     # request rate per src/dst pair over the window
     my $pair = ( $rec->{src_ip} // '?' ) . '|' . ( $rec->{dest_ip} // '?' );
 
     return {
         length       => $h->{length} // 0,
         status        => $h->{status} // 0,
-        http_method   => $h->{http_method} // '',
-        url           => $h->{url} // '',                 # -> url_* mungers
+        http_method   => $method // '',
+        url           => $url // '',                       # -> url_* mungers
         user_agent    => $h->{http_user_agent} // '',     # -> ua_entropy
         src_request_rate => $self->_rate( "http:req:$pair", 1 ),
     };
@@ -440,8 +450,33 @@ sub _extract_dns {
     my ( $self, $rec ) = @_;
     my $d = $rec->{dns} or return;
 
-    # per-event set: score DNS queries (and answered queries carrying rcode)
-    my $domain = $d->{rrname} // return;
+    # Suricata's DNS EVE shape changed across versions. Older logs put rrname /
+    # rrtype / ttl flat on `dns`; v2/v3 (`dns.version`) nest the asked name
+    # under `queries[]` (present on both request and response events) and the
+    # returned records under `answers[]`. Read both so a query is scored no
+    # matter which format the emitting Suricata uses.
+    my $query = ( ref $d->{queries} eq 'ARRAY' && ref $d->{queries}[0] eq 'HASH' )
+        ? $d->{queries}[0] : undef;
+    my @answers = grep { ref $_ eq 'HASH' }
+        ( ref $d->{answers} eq 'ARRAY' ? @{ $d->{answers} } : () );
+
+    my $domain = $d->{rrname}
+        // ( $query ? $query->{rrname} : undef )
+        // ( @answers ? $answers[0]{rrname} : undef );
+    defined $domain && length $domain or return;
+
+    my $rrtype = $d->{rrtype}
+        // ( $query ? $query->{rrtype} : undef )
+        // ( @answers ? $answers[0]{rrtype} : undef )
+        // '';
+
+    # Answer TTL: the smallest across the returned answers (a very low TTL is
+    # the suspicious case); a flat `dns.ttl` wins when Suricata supplies one.
+    my $ttl = $d->{ttl};
+    if ( !defined $ttl ) {
+        my @ttls = sort { $a <=> $b } grep { defined } map { $_->{ttl} } @answers;
+        $ttl = @ttls ? $ttls[0] : 0;
+    }
 
     # NXDOMAIN rate per client. We read the per-client rate on every query but
     # only mark the meter when this particular event is an NXDOMAIN.
@@ -451,10 +486,10 @@ sub _extract_dns {
 
     return {
         domain        => $domain,             # -> entropy + domain_length + label_count
-        rrtype        => $d->{rrtype} // '',
+        rrtype        => $rrtype,
         nxdomain_rate => $nxdomain_rate,
-        ttl            => $d->{ttl} // 0,
-        answer_count   => ref $d->{answers} eq 'ARRAY' ? scalar @{ $d->{answers} } : 0,
+        ttl           => $ttl,
+        answer_count  => scalar @answers,
     };
 }
 
@@ -496,6 +531,12 @@ sub _extract_smtp {
     my $helo      = $s->{helo}      // '';
     my $mail_from = $s->{mail_from} // '';
     my @rcpts     = ref $s->{rcpt_to} eq 'ARRAY' ? @{ $s->{rcpt_to} } : ();
+
+    # Skip a content-free SMTP event (a bare transaction with no HELO, sender,
+    # recipients, or extracted email) — nothing for the envelope/header model to
+    # score. A HELO-only probe is kept: the HELO string is itself a signal (a
+    # spoofed "localhost" or a forged local domain is exactly what we score).
+    return unless length $helo || length $mail_from || @rcpts || %$email;
 
     # distinct recipients per sender over the window (mass-mailing / spam).
     my $sender = length $mail_from ? lc $mail_from : ( $rec->{src_ip} // '?' );
@@ -548,7 +589,10 @@ sub _extract_ssh {
         hassh_server    => ref $v->{hassh} eq 'HASH' ? ( $v->{hassh}{hash} // '' ) : ( $v->{hassh} // '' ),
         client_software => $c->{software_version} // '',
         server_software => $v->{software_version} // '',
-        proto_version   => $c->{proto_version} // '',
+        # a flow-timeout event may carry only the server banner (client never
+        # sent one); fall back to the server's proto so the row still records
+        # the SSH version rather than an unknown.
+        proto_version   => $c->{proto_version} // $v->{proto_version} // '',
         conn_rate       => $self->_rate( "ssh:conn:$src", 1 ),
     };
 }
@@ -860,7 +904,10 @@ sub _extract_mqtt {
     my $sub     = ref $q->{subscribe} eq 'HASH' ? $q->{subscribe} : {};
     my $connack = ref $q->{connack} eq 'HASH' ? $q->{connack} : {};
 
-    my $client = length( $conn->{client_id} // '' ) ? $conn->{client_id} : ( $rec->{src_ip} // '?' );
+    # only CONNECT carries a client_id; publishes / pings / acks do not, so key
+    # the per-client meters on the client_id when present, else the source IP.
+    my $cid    = $conn->{client_id} // '';
+    my $client = length $cid ? $cid : ( $rec->{src_ip} // '?' );
 
     # topic from a PUBLISH, else the first SUBSCRIBE topic.
     my $topic = $pub->{topic};
@@ -875,12 +922,14 @@ sub _extract_mqtt {
     return {
         mqtt_type        => $mtype,
         topic            => $topic,     # -> length + depth + entropy
-        client_id        => $conn->{client_id} // '',   # -> client_id_entropy
+        client_id        => $cid,       # -> client_id_entropy
         payload_size     => length( $pub->{message} // '' ),
         wildcard_sub     => ( $topic =~ /[#+]/ ) ? 1 : 0,
         msg_rate         => $self->_rate( "mqtt:msg:$client", 1 ),
         distinct_topics  => $self->_distinct_count( "mqtt:topic:$client", length $topic ? $topic : () ),
-        new_client_id    => $self->_first_seen( "mqtt:cid:" . ( $conn->{client_id} // '' ) ),
+        # newness only applies to an actual client_id (a CONNECT); the many
+        # id-less packet types are not "a new client".
+        new_client_id    => length $cid ? $self->_first_seen("mqtt:cid:$cid") : 0,
         connack_fails    => $self->_rate( "mqtt:connack:$client", $connack_fail ),
     };
 }
@@ -891,14 +940,21 @@ sub _extract_quic {
     my $src = $rec->{src_ip} // '?';
 
     my $sni = $u->{sni} // '';
-    my $ja4 = $u->{ja4} // ( ref $u->{ja3} eq 'HASH' ? ( $u->{ja3}{hash} // '' ) : ( $u->{ja3} // '' ) );
-    my $cyu = ref $u->{cyu} eq 'ARRAY' && ref $u->{cyu}[0] eq 'HASH'
-        ? ( $u->{cyu}[0]{hash} // '' )
+    my $ja3 = ref $u->{ja3} eq 'HASH' ? ( $u->{ja3}{hash} // '' ) : ( $u->{ja3} // '' );
+    my $ja4 = $u->{ja4} // '';
+    my $cyu = ref $u->{cyu} eq 'ARRAY'
+        ? ( ref $u->{cyu}[0] eq 'HASH' ? ( $u->{cyu}[0]{hash} // '' ) : ( $u->{cyu}[0] // '' ) )
         : ( $u->{cyu} // '' );
+
+    # Only the QUIC ClientHello carries the client identity this set models —
+    # SNI + JA3/JA4/CYU. Bare version packets, version negotiation, and
+    # ServerHello (ja3s only) events have none of it, so skip them rather than
+    # flood the set with near-empty rows (one connection emits many such events).
+    return unless length $sni || length $ja3 || length $ja4 || length $cyu;
 
     return {
         quic_version   => $u->{version} // '',
-        ja4            => $ja4,
+        ja4            => length $ja4 ? $ja4 : $ja3,   # prefer JA4, fall back to JA3
         cyu            => $cyu,
         sni            => $sni,           # -> sni_length + sni_entropy
         sni_absent     => length $sni ? 0 : 1,
@@ -949,10 +1005,32 @@ sub _extract_pgsql {
     my $errcode = $err ? ( $err->{code} // $err->{severity} // 'error' ) : undef;
     my $is_authfail = ( $errcode && $errcode =~ /^28/ ) ? 1 : 0;   # SQLSTATE class 28
 
+    # database is nested in startup_parameters.optional_parameters[] as a
+    # {database => ...} entry, not directly under startup_parameters.
+    my $database = $params->{database};
+    if ( !defined $database && ref $params->{optional_parameters} eq 'ARRAY' ) {
+        for my $kv ( @{ $params->{optional_parameters} } ) {
+            next unless ref $kv eq 'HASH' && defined $kv->{database};
+            $database = $kv->{database};
+            last;
+        }
+    }
+
+    # A coarse message type: many PostgreSQL EVE events carry no literal
+    # `.message`, so classify by request shape (Query is the one that matters
+    # most for injection detection) rather than leaving it blank.
+    my $msg_type =
+          length $query                                   ? 'query'
+        : defined $req->{message}                         ? $req->{message}
+        : ( %$params || defined $req->{protocol_version} ) ? 'startup'
+        : $req->{password_redacted}                       ? 'password'
+        : defined $resp->{message}                        ? $resp->{message}
+        :                                                   '';
+
     return {
-        msg_type        => $req->{message} // $resp->{message} // '',
+        msg_type        => $msg_type,
         user            => $params->{user} // '',       # -> user_entropy
-        database        => $params->{database} // '',
+        database        => $database // '',
         query_length    => length $query,
         query_rate      => $self->_rate( "pgsql:q:$src", length $query ? 1 : 0 ),
         auth_fail_rate  => $self->_rate( "pgsql:authf:$src", $is_authfail ),

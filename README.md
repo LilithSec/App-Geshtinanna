@@ -29,12 +29,14 @@ anomaly detection.
   it encodes day-of-week and time-of-day as a single position on a
   604800-second (7-day) circle, returning `($sin, $cos)`. Those become the
   `time_sin` / `time_cos` columns wherever a set is time-aware.
-- `Algorithm::EventsPerSecond` (`new(window => $seconds)` → `mark` → `rate`)
-  backs every rate / per-second column. This also means multiple objects are needed.
-  So lets say we are tracking 4xx errors per second for per src_ip, the hash containing
-  it would like like this `$http4xx_tracking_hashref->{$src_ip}` so we would then call
-  `$http4xx_tracking_hashref->{$src_ip}->mark` for marking a hit and
-  `$http4xx_tracking_hashref->{$src_ip}->rate` for getting the current rate.
+- A small internal sliding-window meter in `App::Geshtinanna::Suricata` backs
+  every rate / per-second column — no external dependency. State is kept per
+  entity under a string key: e.g. 4xx errors for a `src_ip` live under a key
+  like `"http:4xx:$src_ip"`, marked on each hit and read as events-per-second
+  over the configured `rate_window` (default 60s) — see `_rate`. Distinct-count
+  columns (fanout, distinct topics/OIDs/shares, …) use the same window via a
+  companion `_distinct_count` meter, and `_first_seen` / `_freq` back the
+  "new"/prevalence booleans.
 
 ## Design rules (why the columns look the way they do)
 
@@ -136,7 +138,7 @@ one-way and failed flows — scans, RSTs, unanswered UDP where `bytes_toclient` 
 **Candidates to add:** `flow.state` / `flow.reason` (encoded — new vs.
 established, timeout vs. shutdown), `tcp.tcp_flags` and the syn/ack/rst/fin
 booleans (flag combinations catch scans), and packets-per-second via
-`Algorithm::EventsPerSecond`. Held back for now to keep the first set small.
+the internal rate meter. Held back for now to keep the first set small.
 
 ### dns
 
@@ -371,8 +373,8 @@ effectively only appears from ancient gear or deliberate downgrade probing.
 stops inspecting after the key exchange and never records whether authentication
 succeeded, so brute-force and credential-stuffing leave no per-event trace — the
 only tell is volume. A source opening many SSH connections per window is the
-credential-attack signature, so `conn_rate` (per source, via
-`Algorithm::EventsPerSecond`) is the axis that captures it.
+credential-attack signature, so `conn_rate` (per source, via the internal
+rate meter) is the axis that captures it.
 
 > **HASSH-disabled caveat:** HASSH requires `hassh: enabled` in `suricata.yaml`.
 > With it off, `hassh` / `hassh_server` are always empty. Under `missing =>
@@ -443,7 +445,7 @@ baseline. A rare-or-brand-new binary is exactly the file worth a second look.
 
 > **Derived-state caveat:** `hash_first_seen` and `hash_prevalence` are not in
 > any single EVE record — they require a running store of hashes seen across the
-> environment (the same way the rate columns require `Algorithm::EventsPerSecond`
+> environment (the same way the rate columns require the internal rate meter's
 > state). And both depend on file hashing being enabled in `suricata.yaml`
 > (`filestore` / md5 / sha256); with hashing off they are always empty and
 > should ride the set's `missing => zero` policy.
@@ -504,8 +506,8 @@ misbehaving DHCP client rather than a normal OS stack.
 
 > **Derived-state + extended-logging caveat:** `mac_request_rate`, `new_mac`,
 > `subnet_server_count`, and `subnet_mac_count` are not in any single EVE record —
-> they need the pipeline's per-MAC / per-subnet state (rates via
-> `Algorithm::EventsPerSecond`, "seen" sets for the rest). And `hostname`,
+> they need the pipeline's per-MAC / per-subnet state (rates via the internal
+> rate meter, "seen" sets for the rest). And `hostname`,
 > `requested_ip`, lease time, and vendor class only appear when DHCP extended
 > logging is on (`dhcp: extended: yes` in `suricata.yaml`); without it those
 > columns are empty and ride the set's `missing => zero` policy.
@@ -1532,7 +1534,7 @@ Contributes these columns to the host-level model:
 
 | column | description |
 |-|-|
-| alert_count | alerts for this host over the window (rate via `EventsPerSecond`) |
+| alert_count | alerts for this host over the window (rate via the internal rate meter) |
 | distinct_sids | distinct signatures tripped (many *different* sigs ≫ one sig ×1000) |
 | max_severity | highest severity seen (Suricata severity 1 = worst) |
 | high_sev_ratio | high-severity alerts / total |
@@ -1561,7 +1563,7 @@ Suricata, and alerts are what separate that cell from noise.
 > context. The `flow` / `http` / `tls` sets already process that, so use the
 > alert record only for its alert-specific fields (`signature_id`, `category`,
 > `severity`, `action`) joined on `flow_id` — otherwise the flow is counted
-> twice. `alert_count` uses per-host `EventsPerSecond` state; `new_sid` uses a
+> twice. `alert_count` uses per-host rate-meter state; `new_sid` uses a
 > per-host seen-`sid` set.
 
 ### anomaly
@@ -1651,7 +1653,7 @@ defined above into one row per host per window:
 | time_sin / time_cos | window position via `suricata_to_circle_both` (see [DNS tradeoffs](#dns)) |
 | *alert / anomaly / drop columns* | as defined in their sections above |
 
-`Algorithm::EventsPerSecond` supplies the rate columns; time earns its place
+The internal rate meter supplies the rate columns; time earns its place
 here — "host X's activity in this window vs. its baseline" is exactly where
 diurnal context pays off, unlike the per-event sets. MQTT and DHCP especially
 benefit from entity-level aggregation (per device / MAC) at this altitude.
@@ -1671,4 +1673,3 @@ benefit from entity-level aggregation (per device / MAC) at this altitude.
 
 [Algorithm::Classifier::IsolationForest::Online]: https://metacpan.org/pod/Algorithm::Classifier::IsolationForest::Online
 [Algorithm::Time::ToNumber]: https://metacpan.org/pod/Algorithm::Time::ToNumber
-[Algorithm::EventsPerSecond]: https://metacpan.org/pod/Algorithm::EventsPerSecond
